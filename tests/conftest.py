@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
+
+# Colour codes in the middle of a sentence break tests that read terminal output, and some shells and CI systems force
+# them on. The CLI creates its rich consoles when it is imported, which happens after this file loads but before any
+# fixture runs, so the variables have to be cleared here.
+for _name in ("FORCE_COLOR", "FORCE_TERMINAL", "TTY_COMPATIBLE", "CLICOLOR_FORCE"):
+    os.environ.pop(_name, None)
 
 import pytest
 

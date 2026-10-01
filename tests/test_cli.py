@@ -275,7 +275,10 @@ def test_emoji_in_source_does_not_crash_output_on_a_legacy_code_page(fake_provid
 
 def test_command_help_texts_are_shown_whole_and_not_eaten_as_markup():
     """Regression: 'cites ... as [n]' lost its ending because rich read [n] as a markup tag."""
-    overview = runner.invoke(app, ["--help"]).output
+    import re
+
+    # CI forces colour codes into the output, which land in the middle of the sentence; strip them before comparing.
+    overview = re.sub(r"\x1b\[[0-9;]*m", "", runner.invoke(app, ["--help"]).output)
     assert "cites the code it is based on by number." in " ".join(overview.split()).replace("│ ", "").replace(" │", "")
     for command in ("index", "stats", "search", "ask", "serve", "eval"):
         help_text = runner.invoke(app, [command, "--help"])
