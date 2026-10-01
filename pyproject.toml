@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # 77 understands the SPDX `license` expression below
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "codebase-ai"
 version = "0.1.0"
 description = "Ask natural-language questions about a codebase and get answers that cite files and line ranges (RAG)."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pydantic",
@@ -29,7 +31,7 @@ anthropic = ["anthropic"]
 openai = ["openai"]
 ollama = ["ollama"]
 # The provider tests drive the real vendor SDKs over mocked HTTP, so development needs all three.
-dev = ["pytest", "ruff", "anthropic", "openai", "ollama"]
+dev = ["pytest>=8", "ruff>=0.16,<0.17", "anthropic", "openai", "ollama"]  # ruff is pinned so CI lints what you lint
 
 [project.scripts]
 codebase-ai = "codebase_ai.cli:app"
