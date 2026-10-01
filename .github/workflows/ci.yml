@@ -46,4 +46,18 @@ jobs:
         run: ruff check src tests eval
 
       - name: Test
-        run: pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q -rf --tb=short -p no:cacheprovider 2>&1 | tee pytest.log
+
+      - name: Show failing tests as annotations (job logs need a login, annotations do not)
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^(FAILED|ERROR) " pytest.log | head -25 | while IFS= read -r line; do
+            echo "::error title=failed test::${line:0:480}"
+          done
+          grep -E "^E  " pytest.log | head -25 | while IFS= read -r line; do
+            echo "::warning title=assertion detail::${line:0:480}"
+          done
