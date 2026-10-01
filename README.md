@@ -1,5 +1,7 @@
 # AI Codebase Understanding System
 
+[![CI](https://github.com/AbhishekLim17/CodeSage/actions/workflows/ci.yml/badge.svg)](https://github.com/AbhishekLim17/CodeSage/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Ask questions about a codebase in plain English and get explanations that cite the exact files and line ranges they came from.
 
 It combines NLP (identifier-aware search, follow-up rewriting), Large Language Models (Claude, OpenAI or a local Ollama model write the answer) and Retrieval-Augmented Generation (the answer is built only from code retrieved from your repository, and every citation is checked against what was retrieved). The goal is to shorten code comprehension and developer onboarding.
@@ -98,7 +100,7 @@ It also prints a warning when an answer cites nothing, cites a source that does 
 
 The design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The evidence behind every default, what worked, what did not and what was never measured, is in [`docs/FINAL_REPORT.md`](docs/FINAL_REPORT.md).
 
-**What was and was not tested.** About 960 automated tests pass on Windows (the CI workflow also runs them on Linux). The three LLM provider adapters are tested against the real vendor SDKs over mocked HTTP, and the app is tested headless and by hand in a browser against real indexes. **No language model was ever run against this system**: no API key was used and no local model is installed. So the answers themselves, follow-up rewriting, and the answer-quality evaluation with its faithfulness judge are built and tested with scripted stand-ins only. Retrieval, indexing, the repository map and git cloning have been run for real. To see real answers you need your own key (below); if a provider misbehaves, the error says which one and what kind of failure it was.
+**What was and was not tested.** About 960 automated tests pass, on Ubuntu (Python 3.11 and 3.13) and Windows (3.13) in CI, offline and without an API key. The three LLM provider adapters are tested against the real vendor SDKs over mocked HTTP, and the app is tested headless and by hand in a browser against real indexes. **No language model was ever run against this system**: no API key was used and no local model is installed. So the answers themselves, follow-up rewriting, and the answer-quality evaluation with its faithfulness judge are built and tested with scripted stand-ins only. Retrieval, indexing, the repository map and git cloning have been run for real. To see real answers you need your own key (below); if a provider misbehaves, the error says which one and what kind of failure it was.
 
 ## Install
 

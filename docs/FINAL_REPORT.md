@@ -77,6 +77,7 @@ Running on real repositories and real data found problems that unit tests writte
 | The real UI against a real index | Stale button label after indexing; log flooded with tracebacks from a file watcher | Page redraws from fresh state; watcher off in `serve` |
 | Running the repository map on `psf/requests`, which it had not been tuned on | `requirements.txt` listed as documentation; `.rst` titles missed; modules whose docstring begins with their own name described as that name | Fixed, with regression tests |
 | Writing held-out questions for the overview classifier | The 64% recall reported at first was optimistic: 2 of 20 fresh phrasings were recognised | Patterns rebuilt by intent; both numbers are reported, and the 18 of 20 afterwards is labelled as not independent |
+| The first CI run, on Linux for the first time | One test of about 960 failed in all three environments: typer forces colour codes into help text on GitHub Actions, which landed mid-sentence | The test strips them and the test environment clears colour-forcing variables; CI now also reports failing tests as public annotations |
 | Capturing `--help` for the README | `[n]` in a help string was eaten as markup | Reworded, regression-tested |
 | The full test suite, once it passed 500 tests | "Too many open files": closing an index left Chroma's handles open, which also blocks deleting the index folder on Windows | `close()` now releases them; reproduced and tested |
 
