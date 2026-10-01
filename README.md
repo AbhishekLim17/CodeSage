@@ -44,7 +44,7 @@ $ codebase-ai search https://github.com/psf/requests "how are redirects followed
 5 of 16 sources, about 3548 tokens (vector)
 ```
 
-The right code is found, but notice result 1: the changelog ranks above the implementation. On repositories with a lot of prose documentation, prose can outrank code (see [Limitations](#limitations)).
+The right code is found, but notice result 1: the changelog ranks above the implementation. `CHANGELOG_PENALTY` can demote release notes, but on 109 labelled questions it changed one question by one rank, so it is off (see [Limitations](#limitations)).
 
 **Whole-project questions get a map.** For "what does this project do?", the model is also given a generated map of the repository, built from the index with no model call, and the top of the README. This is the map for the same repository, abridged:
 
@@ -98,7 +98,7 @@ It also prints a warning when an answer cites nothing, cites a source that does 
 
 The design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The evidence behind every default, what worked, what did not and what was never measured, is in [`docs/FINAL_REPORT.md`](docs/FINAL_REPORT.md).
 
-**What was and was not tested.** About 900 automated tests pass. The three LLM provider adapters are tested against the real vendor SDKs over mocked HTTP, and the app is tested headless and by hand in a browser against real indexes. **No language model was ever run against this system**: no API key was used and no local model is installed. So the answers themselves, follow-up rewriting, and the answer-quality evaluation with its faithfulness judge are built and tested with scripted stand-ins only. Retrieval, indexing, the repository map and git cloning have been run for real. To see real answers you need your own key (below); if a provider misbehaves, the error says which one and what kind of failure it was.
+**What was and was not tested.** About 960 automated tests pass on Windows (the CI workflow also runs them on Linux). The three LLM provider adapters are tested against the real vendor SDKs over mocked HTTP, and the app is tested headless and by hand in a browser against real indexes. **No language model was ever run against this system**: no API key was used and no local model is installed. So the answers themselves, follow-up rewriting, and the answer-quality evaluation with its faithfulness judge are built and tested with scripted stand-ins only. Retrieval, indexing, the repository map and git cloning have been run for real. To see real answers you need your own key (below); if a provider misbehaves, the error says which one and what kind of failure it was.
 
 ## Install
 
@@ -158,19 +158,24 @@ Indexes and clones live in `~/.codebase_ai/` (set `INDEX_DIR` to change it).
 | Which embedding model? | `bge-small-en-v1.5`, within noise of larger ones | [`docs/EMBEDDING_BENCHMARK.md`](docs/EMBEDDING_BENCHMARK.md) |
 | Does hybrid (keyword + vector) search beat vector? | No: -0.034 MRR, interval [-0.095, +0.026], 85 questions | [`docs/RETRIEVAL_EVAL.md`](docs/RETRIEVAL_EVAL.md) |
 | Does demoting test files help? | Yes: +0.032 MRR, better on 10 questions, worse on none | same |
-| Does a repository map help whole-project questions? | Areas shown rose from 63% to 90% on 11 questions; the classifier recognises 64% of such questions | [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) |
+| Does a repository map help whole-project questions? | Areas shown rose from 63% to 93% on 11 questions; recognising such questions was the weak part (2 of 20 fresh phrasings at first, 18 of 20 after widening, which is not independent) | [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) |
 | Does a cross-encoder reranker help? | No: -0.037 MRR, about 2 s slower per query (one small model tried) | same |
+| Does demoting changelogs help? | No measurable effect (1 of 109 questions moved by one rank); off | same |
+| Does it scale? | Linear up to 4,000 files / 28,000 chunks (63 s, 85 MB, 10 ms search) without the embedding model; the real model needs about an hour for that size on a CPU (extrapolated) | same |
 | Are the answers faithful to the cited code? | **Not measured**: needs a live model; the harness is built | same |
 
 ## Limitations
 
 - **No live-model verification** (above). Answer quality, follow-up rewriting and the judge are untested against a real model.
-- **Prose can outrank code.** On `psf/requests` the changelog and long guides ranked above `sessions.py` for a question about redirects. Test files are demoted; documentation is not. No fix was added without an evaluation, and this one has not been evaluated.
+- **Prose can outrank code.** On `psf/requests` the changelog ranked above `sessions.py` for a question about redirects. Demoting release notes made no measurable difference over 24 `requests` questions and 85 others, so it is off; long guides can still outrank code, which is sometimes the right answer.
 - **Small, partly self-written question sets.** 85 retrieval questions and 11 overview questions over three repositories; two were labelled by the author of the system. Treat the direction of each result as credible and the exact percentages as rough.
 - **Languages.** Tree-sitter chunking covers Python, JavaScript/TypeScript, Java and Go. Other languages are indexed in line windows, which works but cuts at arbitrary points.
-- **Overview recognition is pattern based** and misses about a third of the phrasings tried; a missed one just gets ordinary retrieval.
+- **Overview recognition is pattern based.** On fresh phrasings written before the patterns were widened it recognised only 2 of 20. After widening it recognises 18 of 20 of the same items, but those were written by the same person who wrote the patterns, so measure it on your own phrasing with `eval/check_classifier.py`. A miss just gets ordinary retrieval.
 - **Git URLs:** `https` and `ssh` only, public repositories or ones your own git credentials can already reach. `index --branch` selects a branch on the first clone and on updates.
-- **No license file yet.** One has to be chosen by whoever owns the code before it is shared.
+
+## License
+
+MIT; see [`LICENSE`](LICENSE).
 
 ## Privacy
 
@@ -180,7 +185,7 @@ With a cloud LLM or cloud embeddings, retrieved code snippets are sent to that p
 
 ```bash
 pip install -e ".[dev]"
-pytest                               # about 900 tests; needs no network and no API key
+pytest                               # about 960 tests; needs no network and no API key
 ruff check src tests eval
 ```
 
