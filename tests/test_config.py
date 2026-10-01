@@ -117,6 +117,7 @@ def test_the_retriever_library_defaults_match_the_settings_defaults():
     s = Settings(_env_file=None)
     assert defaults["mode"] == s.retrieval_mode
     assert defaults["test_penalty"] == s.test_penalty
+    assert defaults["changelog_penalty"] == s.changelog_penalty
     assert defaults["keyword_weight"] == s.keyword_weight
     assert defaults["top_k"] == s.retrieve_top_k
     assert defaults["budget_tokens"] == s.context_token_budget

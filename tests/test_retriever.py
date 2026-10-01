@@ -379,3 +379,112 @@ def test_retriever_ranks_a_test_file_below_the_code_it_tests(sample_repo, tmp_pa
             assert same.ranked_files == plain.ranked_files, mode
     finally:
         idx.close()
+
+
+# --- release notes (changelog) demotion ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["HISTORY.md", "CHANGELOG.md", "docs/CHANGES.rst", "NEWS", "RELEASE_NOTES.md", "release-notes.txt", "CHANGELOG-1.2.md", "whats-new.md"],
+)
+def test_release_notes_are_recognised(path):
+    from codebase_ai.retrieval.retriever import is_changelog_path
+
+    assert is_changelog_path(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["src/history.py", "src/requests/history_utils.py", "app/releases.js", "docs/releases/1.2.md", "src/changes/apply.py", "README.md", "docs/guide.rst", "src/news.ts"],
+)
+def test_code_and_other_documents_are_never_taken_for_release_notes(path):
+    from codebase_ai.retrieval.retriever import is_changelog_path
+
+    assert not is_changelog_path(path)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Which release dropped support for an old Python version?", True),
+        ("What changed in 2.0?", True),
+        ("Show me the changelog", True),
+        ("How do I upgrade from 1.x?", True),
+        ("How does a session handle redirects?", False),
+        ("What happens when a value is None?", False),
+    ],
+)
+def test_questions_about_changes_are_recognised(query, expected):
+    from codebase_ai.retrieval.retriever import mentions_changes
+
+    assert mentions_changes(query) is expected
+
+
+class TestPathPenalties:
+    def scored(self):
+        return [
+            (chunk(path="HISTORY.md", text="x"), 1.0),
+            (chunk(path="tests/test_a.py", text="x"), 0.9),
+            (chunk(path="src/a.py", text="x"), 0.8),
+        ]
+
+    def paths(self, result):
+        return [c.path for c, _ in result]
+
+    def test_both_penalties_reorder_and_nothing_is_dropped(self):
+        from codebase_ai.retrieval.retriever import apply_path_penalties
+
+        out = apply_path_penalties(self.scored(), "how does it work", test_penalty=0.5, changelog_penalty=0.5)
+        assert self.paths(out) == ["src/a.py", "HISTORY.md", "tests/test_a.py"]  # 0.8, 0.5, 0.45
+
+    def test_each_penalty_is_independent(self):
+        from codebase_ai.retrieval.retriever import apply_path_penalties
+
+        assert self.paths(apply_path_penalties(self.scored(), "q", changelog_penalty=0.5)) == ["tests/test_a.py", "src/a.py", "HISTORY.md"]
+        assert self.paths(apply_path_penalties(self.scored(), "q", test_penalty=0.5)) == ["HISTORY.md", "src/a.py", "tests/test_a.py"]
+
+    def test_a_question_about_changes_keeps_release_notes_in_place_but_tests_are_still_demoted(self):
+        from codebase_ai.retrieval.retriever import apply_path_penalties
+
+        out = apply_path_penalties(self.scored(), "which release changed this", test_penalty=0.5, changelog_penalty=0.1)
+        assert self.paths(out) == ["HISTORY.md", "src/a.py", "tests/test_a.py"]
+
+    def test_a_question_about_tests_keeps_tests_but_release_notes_are_still_demoted(self):
+        from codebase_ai.retrieval.retriever import apply_path_penalties
+
+        out = apply_path_penalties(self.scored(), "how is this tested", test_penalty=0.1, changelog_penalty=0.5)
+        assert self.paths(out) == ["tests/test_a.py", "src/a.py", "HISTORY.md"]
+
+    def test_with_both_off_the_input_is_returned_untouched(self):
+        from codebase_ai.retrieval.retriever import apply_path_penalties
+
+        scored = self.scored()
+        assert apply_path_penalties(scored, "q") is scored
+
+    def test_the_old_test_penalty_function_still_behaves_the_same(self):
+        assert self.paths(apply_test_penalty(self.scored(), 0.5, "how does it work")) == ["HISTORY.md", "src/a.py", "tests/test_a.py"]
+
+
+def test_changelog_penalty_must_be_in_range(built, fake_embedder):
+    for bad in (0, -0.1, 1.5):
+        with pytest.raises(ValueError, match="changelog_penalty"):
+            Retriever(built, fake_embedder, changelog_penalty=bad)
+
+
+def test_a_retriever_demotes_release_notes_unless_the_question_is_about_releases(tmp_path, fake_embedder):
+    repo = tmp_path / "proj"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "redirects.py").write_text("def follow_redirects(url):\n    return url\n", encoding="utf-8")
+    (repo / "HISTORY.md").write_text("# History\n\n- How are redirects followed: redirects are followed, redirects followed.\n", encoding="utf-8")
+    index = RepoIndex(repo, tmp_path / "idx-cl")
+    try:
+        Indexer(index, fake_embedder).run()
+        plain = Retriever(index, fake_embedder, test_penalty=1.0).rank("how are redirects followed")
+        demoted = Retriever(index, fake_embedder, test_penalty=1.0, changelog_penalty=0.1).rank("how are redirects followed")
+        assert plain[0].chunk.path == "HISTORY.md"  # the situation being fixed: prose outranks the code
+        assert demoted[0].chunk.path == "src/redirects.py" and {s.chunk.path for s in demoted} == {s.chunk.path for s in plain}
+        about = Retriever(index, fake_embedder, test_penalty=1.0, changelog_penalty=0.1).rank("which release changed how redirects are followed")
+        assert about[0].chunk.path == "HISTORY.md"
+    finally:
+        index.close()

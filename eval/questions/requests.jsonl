@@ -1,0 +1,24 @@
+{"id": "rq01", "type": "explain", "question": "How does a session decide whether to send the Authorization header again after a redirect to a different host?", "gold_files": ["src/requests/sessions.py"], "gold_symbols": ["rebuild_auth"]}
+{"id": "rq02", "type": "explain", "question": "How are proxies chosen for a request when environment variables like NO_PROXY are set?", "gold_files": ["src/requests/utils.py"], "gold_symbols": ["should_bypass_proxies"]}
+{"id": "rq03", "type": "explain", "question": "How is a dictionary of files turned into a multipart form-data request body?", "gold_files": ["src/requests/models.py"], "gold_symbols": ["_encode_files"]}
+{"id": "rq04", "type": "explain", "question": "How does the library work out the text encoding of a response when the server does not say?", "gold_files": ["src/requests/models.py", "src/requests/utils.py"], "gold_symbols": ["get_encoding_from_headers"]}
+{"id": "rq05", "type": "explain", "question": "How is HTTP digest authentication implemented, including the nonce counter?", "gold_files": ["src/requests/auth.py"], "gold_symbols": ["HTTPDigestAuth"]}
+{"id": "rq06", "type": "explain", "question": "Where are cookies stored and how are they merged into outgoing requests?", "gold_files": ["src/requests/cookies.py"], "gold_symbols": ["RequestsCookieJar"]}
+{"id": "rq07", "type": "locate", "question": "Where are HTTP status codes mapped to friendly names such as ok or not_found?", "gold_files": ["src/requests/status_codes.py"]}
+{"id": "rq08", "type": "explain", "question": "How are header names compared without regard to upper or lower case?", "gold_files": ["src/requests/structures.py"], "gold_symbols": ["CaseInsensitiveDict"]}
+{"id": "rq09", "type": "explain", "question": "How does streaming a large response in chunks work, and how are the lines split?", "gold_files": ["src/requests/models.py"], "gold_symbols": ["iter_content"]}
+{"id": "rq10", "type": "explain", "question": "How are connection pools created and how many connections do they keep?", "gold_files": ["src/requests/adapters.py"], "gold_symbols": ["HTTPAdapter"]}
+{"id": "rq11", "type": "explain", "question": "How does the library read login credentials from a netrc file?", "gold_files": ["src/requests/utils.py"], "gold_symbols": ["get_netrc_auth"]}
+{"id": "rq12", "type": "explain", "question": "How are callbacks run after a response is received?", "gold_files": ["src/requests/hooks.py"], "gold_symbols": ["dispatch_hook"]}
+{"id": "rq13", "type": "explain", "question": "How does it detect whether a JSON body is encoded as utf-8, utf-16 or utf-32?", "gold_files": ["src/requests/utils.py"], "gold_symbols": ["guess_json_utf"]}
+{"id": "rq14", "type": "locate", "question": "Which exception is raised when there are too many redirects?", "gold_files": ["src/requests/exceptions.py", "src/requests/sessions.py"], "gold_symbols": ["TooManyRedirects"]}
+{"id": "rq15", "type": "explain", "question": "How does it work out the length of a body so that a Content-Length header can be set?", "gold_files": ["src/requests/utils.py", "src/requests/models.py"], "gold_symbols": ["super_len"]}
+{"id": "rq16", "type": "explain", "question": "How are settings from a session and from a single request combined, and what happens when a value is None?", "gold_files": ["src/requests/sessions.py"], "gold_symbols": ["merge_setting"]}
+{"id": "rq17", "type": "explain", "question": "How are Link headers parsed into a list of dictionaries?", "gold_files": ["src/requests/utils.py"], "gold_symbols": ["parse_header_links"]}
+{"id": "rq18", "type": "explain", "question": "Where does the library find the bundle of trusted certificate authorities for verifying servers?", "gold_files": ["src/requests/certs.py", "src/requests/adapters.py"]}
+{"id": "rq19", "type": "explain", "question": "How does a failed request get retried, and how many times by default?", "gold_files": ["src/requests/adapters.py"], "gold_symbols": ["HTTPAdapter"]}
+{"id": "rq20", "type": "explain", "question": "How does the bug report helper gather details about the system and the installed versions?", "gold_files": ["src/requests/help.py"]}
+{"id": "rq21", "type": "doc", "question": "Which release dropped support for an old Python version?", "gold_files": ["HISTORY.md"]}
+{"id": "rq22", "type": "doc", "question": "In which version did the way redirects are resolved change?", "gold_files": ["HISTORY.md"]}
+{"id": "rq23", "type": "doc", "question": "What bug fixes went into the most recent release?", "gold_files": ["HISTORY.md"]}
+{"id": "rq24", "type": "doc", "question": "When were the proxy handling fixes made, and in which release?", "gold_files": ["HISTORY.md"]}

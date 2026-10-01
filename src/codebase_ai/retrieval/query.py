@@ -22,49 +22,81 @@ from codebase_ai.llm.base import LLMProvider, Message, complete
 
 # --- overview questions -----------------------------------------------------------------------------------------
 
-_REPO = r"(?:project|repo|repository|codebase|code base|code|app|application|system|program|software|service)"
-_SCOPE_AFTER = re.compile(  # "... of the Kanban board": the question is about one part, not the whole
-    rf"^\s*(?:of|in|for|inside|within|behind)\s+(?:the|a|an|our|this)\s+(?!{_REPO}\b)", re.IGNORECASE
+_REPO = r"(?:project|repo|repository|codebase|code\s?base|code|app|application|system|software|program|service|library|package|tool|monorepo)"
+_THE_REPO = rf"(?:this|the|our|my)\s+{_REPO}"
+_PARTS = r"(?:components|modules|parts|packages|directories|folders|areas|layers|pieces|subsystems|services|sections|blocks)"
+# "... of the Kanban board": words after a match that narrow the question to one part instead of the whole repository.
+_SCOPE_AFTER = re.compile(
+    rf"^\s*(?:of|in|for|inside|within|behind|about|on)\s+(?:the|a|an|our|this|these|those|each|every)\s+(?!{_REPO}\b)",
+    re.IGNORECASE,
 )
-_UNITS = r"(?:components|modules|parts|packages|directories|folders|areas|layers|pieces|subsystems|services|sections)"
 
-_OVERVIEW = [
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in (
-        r"\b(?:overview|big picture|high[- ]level|bird'?s[- ]eye)\b",
-        rf"\bwhat\s+(?:does|is)\s+(?:this|the|our)\s+{_REPO}\s+(?:do|for|about)\b",
-        rf"\bwhat\s+is\s+(?:this|the|our)\s+{_REPO}\b",
-        rf"\b(?:explain|describe|summari[sz]e|walk\s+me\s+through)\s+(?:this|the|our)\s+{_REPO}\b",
-        rf"\bhow\s+is\s+(?:this|the|our)\s+{_REPO}\s+(?:organi[sz]ed|structured|laid\s+out|put\s+together|built|arranged)\b",
-        rf"\b(?:{_REPO}|folder|directory|repo)\s+(?:structure|layout|organi[sz]ation)\b",
-        r"\barchitecture\b",
-        r"\btech(?:nology)?\s+stack\b",
-        r"\bwhere\s+(?:should|do|can)\s+i\s+(?:start|begin)\b",
-        r"\b(?:getting\s+started|onboarding|new\s+to\s+(?:this|the))\b",
-        rf"\bhow\s+do(?:es)?\s+(?:all\s+)?(?:the\s+)?(?:\w+\s+)?(?:pieces|parts|{_UNITS})\s+(?:fit|work|connect)\s+together\b",
+# What a question about the whole repository asks for, grouped by intent. The second field says whether the pattern
+# can be narrowed by what follows it ("an overview *of the cart*", "the architecture *of the cache layer*").
+_INTENTS: list[tuple[str, re.Pattern[str], bool]] = [
+    (name, re.compile(pattern, re.IGNORECASE), scopable)
+    for name, pattern, scopable in (
+        # What is it, what is it for
+        ("identity", rf"\bwhat(?:'s|\s+is|\s+does)\s+{_THE_REPO}\s+(?:do|for|about|used\s+for|is\s+about)\b", False),
+        ("identity", rf"\bwhat(?:'s|\s+is)\s+{_THE_REPO}\b", False),
+        ("identity", rf"\bwhat\s+{_THE_REPO}\s+(?:is|does)\b", False),
+        ("purpose", rf"\b(?:purpose|point|goal|aim)\s+of\s+{_THE_REPO}\b", False),
+        ("purpose", rf"\bwhat\s+problem\s+(?:does|is)\s+(?:this|it|{_THE_REPO})\s*(?:\w+\s+)?(?:solve|solving|address|for)\b", False),
+        ("kind", r"\bis\s+(?:this|it)\s+an?\s+(?:\w+\s+)?(?:web\s+)?(?:app|application|library|tool|framework|service|cli|package|monorepo|plugin|script|server|api)\b", False),
+        ("kind", rf"\bwhat\s+(?:kind|type|sort)\s+of\s+{_REPO}\s+is\s+(?:this|it)\b", False),
+        # A summary or a view from above
+        ("overview", r"\boverview\b", True),
+        ("overview", r"\b(?:big|whole|full|overall)\s+picture\b|\bhigh[- ]level\b|\bbird'?s[- ]eye\b|\b\d[\d,.]*[- ]?(?:foot|feet)\s+view\b|\bat\s+a\s+glance\b", False),
+        ("overview", r"\b(?:quick\s+|short\s+|brief\s+|guided\s+)?tour\b", True),
+        ("overview", rf"\b(?:summari[sz]e|summary\s+of|describe|explain|walk\s+me\s+through)\s+(?:what\s+)?{_THE_REPO}\b", False),
+        # How it is built
+        ("structure", rf"\bhow\s+(?:is|are)\s+(?:this|the|our)\s+(?:\w+\s+)?{_REPO}\s+(?:organi[sz]ed|structured|laid\s+out|put\s+together|built|arranged|designed|architected)\b", False),
+        ("structure", rf"\b(?:structure|layout|organi[sz]ation|architecture|design)\s+of\s+{_THE_REPO}\b", False),
+        ("structure", r"\b(?:overall|whole|entire|general|top[- ]level)\s+(?:design|architecture|structure|layout)\b", True),
+        ("structure", r"\barchitecture\b", True),
+        ("structure", rf"\b{_REPO}\s+(?:structure|layout|organi[sz]ation|architecture)\b", True),
+        ("structure", r"\b(?:folder|directory)\s+(?:structure|layout)\b", False),
+        ("structure", r"\bhow\s+(?:is|are)\s+(?:this|it)\s+(?:organi[sz]ed|structured|laid\s+out|put\s+together|built|arranged)\b", False),
+        ("parts", rf"\b(?:main|major|key|core|top[- ]level|important|different|various)\s+{_PARTS}\b", True),
+        ("parts", r"\bbuilding\s+blocks\b", True),
+        ("parts", r"\bwhat\s+(?:does|do)\s+(?:each|every|all)\s+(?:the\s+)?(?:top[- ]level\s+)?(?:folder|directory|package|module)s?\s+(?:contain|do|hold|have|mean)\b", False),
+        ("parts", r"\bwhich\s+(?:folders|directories|packages|modules)\s+(?:hold|contain|have|are\s+for)\b", False),
+        ("fit", rf"\b(?:how\s+)?(?:everything|it\s+all|all\s+of\s+it|(?:all\s+)?(?:the\s+)?(?:\w+\s+)?(?:pieces|{_PARTS}))\s+(?:do\s+|does\s+)?(?:fit|fits|work|works|connect|connects|relate|relates)\s+(?:together|with\s+each\s+other|to\s+each\s+other)\b", False),
+        ("fit", rf"\bhow\s+do(?:es)?\s+(?:all\s+)?(?:the\s+)?(?:\w+\s+)?(?:pieces|{_PARTS})\s+(?:fit|work|connect|relate)\b", True),
+        # What it is made of
+        ("stack", r"\btech(?:nology)?\s+stack\b", False),
+        ("stack", rf"\b(?:what|which)\s+(?:\w+\s+)?(?:technolog\w+|languages?|frameworks?|libraries|tools|stack)(?:\s+and\s+(?:\w+\s+)?(?:technolog\w+|languages?|frameworks?|libraries|tools))?\s+(?:does|do|is|are)\s+(?:it|this|{_THE_REPO}|we)\s+(?:\w+\s+)?(?:use|used|using|built\s+(?:with|on|in)|written\s+in)\b", False),
+        ("stack", r"\bwhat\s+(?:is|was)\s+(?:this|it)\s+(?:built|written|made)\s+(?:with|in|using)\b", False),
+        # Getting started
+        ("onboarding", r"\bwhere\s+(?:should|do|can|would)\s+i\s+(?:start|begin)\b", False),
+        ("onboarding", r"\bwhat\s+(?:should|do|can)\s+i\s+(?:read|look\s+at|open|check|start\s+with)\b(?:.*\bfirst\b)?", False),
+        ("onboarding", r"\b(?:getting\s+started|get(?:ting)?\s+(?:oriented|familiar|up\s+to\s+speed)|onboarding|(?:just\s+)?joined\s+(?:the\s+)?(?:team|project)|new\s+(?:here|to\s+(?:this|the)))\b", False),
     )
 ]
-_PART_OF_WHOLE = re.compile(rf"\b(?:main|major|key|core|top[- ]level|important)\s+{_UNITS}\b", re.IGNORECASE)
 _CODE_REFERENCE = re.compile(
     r"`[^`]+`"  # anything in backticks
     r"|\b[\w.-]+/[\w./-]*\.\w{1,5}\b"  # a file path
     r"|\b\w+\.(?:py|js|jsx|ts|tsx|java|go|json|ya?ml|md|toml|rules)\b"  # a file name
     r"|\b[a-z]+_[a-z_]+\b|\b[a-z]+[A-Z]\w*\b",  # snake_case or camelCase identifiers
 )
-_ARCHITECTURE_OF_PART = re.compile(r"\barchitecture\s+(?:of|for|behind)\s+(?:the|a|an|our)\s+(?!" + _REPO + r"\b)", re.IGNORECASE)
+
+
+def overview_intent(question: str) -> str | None:
+    """Which kind of whole-repository question this is (``identity``, ``structure``, ``stack``...), or ``None``."""
+    text = " ".join(question.split())
+    if not text or _CODE_REFERENCE.search(text):
+        return None  # naming a concrete identifier or file means the question has a specific target
+    for name, pattern, scopable in _INTENTS:
+        for found in pattern.finditer(text):
+            if scopable and _SCOPE_AFTER.match(text[found.end() :]):
+                continue  # "an overview of the cart": one part, not the whole
+            return name
+    return None
 
 
 def is_overview_question(question: str) -> bool:
     """True when the question asks about the repository as a whole rather than about one piece of it."""
-    text = " ".join(question.split())
-    if not text or _CODE_REFERENCE.search(text):
-        return False  # naming a concrete identifier or file means the question has a specific target
-    if _ARCHITECTURE_OF_PART.search(text):
-        return False
-    if any(pattern.search(text) for pattern in _OVERVIEW):
-        return True
-    part = _PART_OF_WHOLE.search(text)
-    return part is not None and _SCOPE_AFTER.match(text[part.end() :]) is None
+    return overview_intent(question) is not None
 
 
 # --- follow-up questions ----------------------------------------------------------------------------------------

@@ -288,3 +288,68 @@ def test_the_judge_can_be_checked_against_a_human(run_answers, answers_setup, tm
     empty.write_text(json.dumps({"zzz": "supported"}), encoding="utf-8")
     run_answers.main(["--check-sample", str(empty), "--results", str(answers_setup.out)])
     assert "No overlap" in capsys.readouterr().out
+
+
+# --- eval/check_classifier.py ---------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def check_classifier():
+    return load_script("check_classifier")
+
+
+def test_the_classifier_checker_reports_recall_and_false_positives(check_classifier):
+    result = check_classifier.measure(
+        {
+            "overview": ["What does this project do?", "Tell me something unusual about it."],
+            "specific": ["Give me an overview of the cart component.", "Give me an overview of the codebase."],
+        }
+    )
+    assert (result["recognised"], result["overview"]) == (1, 2)
+    assert result["missed"] == ["Tell me something unusual about it."]
+    assert [q for q, _ in result["flagged"]] == ["Give me an overview of the codebase."]  # a mislabelled case is shown
+    text = check_classifier.report(result)
+    assert "Recognised 1 of 2 overview questions (50%)." in text and "Wrongly flagged 1 of 2" in text
+    assert "Tell me something unusual" in text
+
+
+def test_the_classifier_checker_reads_files_and_rejects_bad_ones(check_classifier, tmp_path, capsys):
+    good = tmp_path / "mine.json"
+    good.write_text('{"overview": ["What does this project do?"], "specific": []}', encoding="utf-8")
+    assert check_classifier.main([str(good)]) == 0
+    assert "Recognised 1 of 1" in capsys.readouterr().out
+    assert check_classifier.main([str(tmp_path / "missing.json")]) == 2
+    bad = tmp_path / "bad.json"
+    bad.write_text('["not", "an", "object"]', encoding="utf-8")
+    assert check_classifier.main([str(bad)]) == 2
+    assert check_classifier.main([]) == 0  # the shipped held-out set
+
+
+# --- eval/scale_test.py ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def scale_test():
+    return load_script("scale_test")
+
+
+def test_the_scale_test_generates_a_repository_and_measures_it(scale_test):
+    row = scale_test.measure(12, real_rate=10.0)
+    assert row["files"] == 12 and row["files_indexed"] == 12
+    assert row["chunks"] >= 12 * scale_test.FUNCTIONS_PER_FILE
+    assert row["rerun_seconds"] < row["index_seconds"]  # nothing changed, so nothing is re-embedded
+    assert row["embedding_estimate_minutes"] == pytest.approx(row["chunks"] / 10.0 / 60)
+    text = scale_test.render([row], 10.0)
+    assert "| 12 |" in text and "extrapolated" in text
+
+
+def test_the_scale_test_without_a_real_rate_makes_no_estimate(scale_test):
+    row = scale_test.measure(3, real_rate=None)
+    assert "embedding_estimate_minutes" not in row
+    assert "extrapolated" not in scale_test.render([row], None)
+
+
+def test_the_synthetic_repository_spreads_files_over_folders(scale_test, tmp_path):
+    scale_test.make_repo(tmp_path, 120)
+    assert len(list(tmp_path.rglob("*.py"))) == 120
+    assert len({p.parent for p in tmp_path.rglob("*.py")}) > 10

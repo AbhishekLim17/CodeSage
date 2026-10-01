@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     retrieval_mode: Literal["vector", "keyword", "hybrid"] = "vector"
     keyword_weight: float = Field(default=1.0, ge=0)  # weight of keyword results vs vector results in hybrid fusion
     test_penalty: float = Field(default=0.5, gt=0, le=1)  # score multiplier for test files; 1 turns demotion off
+    # Score multiplier for release notes (CHANGELOG, HISTORY, NEWS...) unless the question is about releases. Off (1) by
+    # default: on 109 questions it moved one question by one rank (docs/QUALITY_EVAL.md), so there is no evidence for it.
+    changelog_penalty: float = Field(default=1.0, gt=0, le=1)
 
     # --- Reranking (M4) ---
     # A cross-encoder model name (e.g. from Hugging Face) to re-order the top candidates; empty = off. Off by default:

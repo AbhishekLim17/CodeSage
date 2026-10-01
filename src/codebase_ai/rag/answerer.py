@@ -259,6 +259,7 @@ def create_answerer(
         keyword_weight=settings.keyword_weight,
         budget_tokens=budget,
         test_penalty=settings.test_penalty,
+        changelog_penalty=settings.changelog_penalty,
         reranker=reranker,
         rerank_top=settings.rerank_top_n,
     )

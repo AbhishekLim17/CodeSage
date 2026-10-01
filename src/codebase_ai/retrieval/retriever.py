@@ -66,18 +66,59 @@ def mentions_tests(query: str) -> bool:
     return any(word in _TEST_WORDS for word in re.findall(r"[a-z]+", query.lower()))
 
 
-def apply_test_penalty(scored: list[tuple[Chunk, float]], penalty: float, query: str) -> list[tuple[Chunk, float]]:
-    """Lower the score of chunks from test files (best-first order is kept for everything else).
-
-    ``penalty`` is a multiplier below 1 (0.5 halves a positive score). Nothing changes when it is 1 or when the
-    query itself is about tests. Tests are demoted, not dropped, so they can still be the answer.
-    """
-    if penalty >= 1.0 or mentions_tests(query):
-        return scored
-    adjusted = [
-        (chunk, score - abs(score) * (1.0 - penalty) if is_test_path(chunk.path) else score) for chunk, score in scored
+_CHANGELOG_PATH = re.compile(
+    r"(^|/)(changelog|changes|change[-_]?log|history|news|releases?|release[-_]?notes|whats[-_]?new|upgrading)"
+    r"([-_]\d[\w.-]*)?(\.(md|markdown|rst|txt))?$",  # a version suffix is fine; a code extension is not
+    re.IGNORECASE,
+)
+_CHANGE_WORDS = frozenset(
+    [
+        *("changelog", "changelogs", "release", "releases", "version", "versions", "history", "news", "upgrade", "upgrading"),
+        *("changed", "change", "changes", "deprecated", "deprecation", "deprecations", "dropped", "introduced", "regression"),
+        *("migrate", "migrating", "migration"),
     ]
+)
+
+
+def is_changelog_path(path: str) -> bool:
+    """True for release notes: CHANGELOG, HISTORY, NEWS, RELEASES, release-notes and similar (with or without extension)."""
+    return _CHANGELOG_PATH.search(path) is not None
+
+
+def mentions_changes(query: str) -> bool:
+    """True if the query asks about releases or what changed, in which case release notes must not be demoted."""
+    return any(word in _CHANGE_WORDS for word in re.findall(r"[a-z]+", query.lower()))
+
+
+def apply_path_penalties(
+    scored: list[tuple[Chunk, float]], query: str, *, test_penalty: float = 1.0, changelog_penalty: float = 1.0
+) -> list[tuple[Chunk, float]]:
+    """Lower the score of chunks from files that are rarely the answer: tests, and release notes.
+
+    Each penalty is a multiplier below 1 (0.5 halves a positive score); 1 turns it off. A penalty is also off when the
+    query is about what it demotes: test files for a question about tests, release notes for a question about releases
+    or changes. Files are demoted, never dropped, so they can still be the answer. Best-first order is kept for
+    everything else.
+    """
+    use_tests = test_penalty < 1.0 and not mentions_tests(query)
+    use_changelogs = changelog_penalty < 1.0 and not mentions_changes(query)
+    if not (use_tests or use_changelogs):
+        return scored
+
+    def factor(path: str) -> float:
+        if use_tests and is_test_path(path):
+            return test_penalty
+        if use_changelogs and is_changelog_path(path):
+            return changelog_penalty
+        return 1.0
+
+    adjusted = [(chunk, score - abs(score) * (1.0 - factor(chunk.path))) for chunk, score in scored]
     return sorted(adjusted, key=lambda pair: -pair[1])  # stable: ties keep their earlier order
+
+
+def apply_test_penalty(scored: list[tuple[Chunk, float]], penalty: float, query: str) -> list[tuple[Chunk, float]]:
+    """Lower the score of chunks from test files; see ``apply_path_penalties``."""
+    return apply_path_penalties(scored, query, test_penalty=penalty)
 
 
 @dataclass(frozen=True)
@@ -152,6 +193,7 @@ class Retriever:
         max_chunks_per_file: int = 4,
         add_context: bool = True,
         test_penalty: float = 0.5,
+        changelog_penalty: float = 1.0,
         reranker: Reranker | None = None,
         rerank_top: int = 30,
     ):
@@ -161,6 +203,8 @@ class Retriever:
             raise ValueError("top_k, budget_tokens, max_chunks and max_chunks_per_file must be positive")
         if not 0 < test_penalty <= 1:
             raise ValueError("test_penalty must be in (0, 1]; 1 turns the demotion of test files off")
+        if not 0 < changelog_penalty <= 1:
+            raise ValueError("changelog_penalty must be in (0, 1]; 1 turns the demotion of release notes off")
         if rerank_top <= 0:
             raise ValueError("rerank_top must be positive")
         if mode != "keyword":
@@ -182,6 +226,7 @@ class Retriever:
         self.max_chunks_per_file = max_chunks_per_file
         self.add_context = add_context
         self.test_penalty = test_penalty
+        self.changelog_penalty = changelog_penalty
         self.reranker = reranker
         self.rerank_top = rerank_top
 
@@ -208,7 +253,7 @@ class Retriever:
             )
         chunks = {c.id: c for c in self.index.keyword.get_chunks([chunk_id for chunk_id, _ in ordered])}
         known = [(chunks[chunk_id], score) for chunk_id, score in ordered if chunk_id in chunks]
-        known = apply_test_penalty(known, self.test_penalty, query)
+        known = apply_path_penalties(known, query, test_penalty=self.test_penalty, changelog_penalty=self.changelog_penalty)
         if self.reranker is not None:
             known = self._rerank(query, known)
         return [ScoredChunk(chunk, score, rank) for rank, (chunk, score) in enumerate(known, start=1)]
@@ -230,7 +275,12 @@ class Retriever:
         if len(scores) != len(head):
             raise RetrievalError(f"The reranker returned {len(scores)} scores for {len(head)} chunks.")
         reordered = sorted(
-            apply_test_penalty([(chunk, score) for (chunk, _), score in zip(head, scores, strict=True)], self.test_penalty, query),
+            apply_path_penalties(
+                [(chunk, score) for (chunk, _), score in zip(head, scores, strict=True)],
+                query,
+                test_penalty=self.test_penalty,
+                changelog_penalty=self.changelog_penalty,
+            ),
             key=lambda pair: -pair[1],
         )
         floor = min(score for _, score in reordered)

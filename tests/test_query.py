@@ -184,8 +184,9 @@ def test_parts_of_one_named_thing_are_not_the_whole_repository():
     assert not is_overview_question("How do the parts of Kanban fit together?")
 
 
-def test_the_shipped_overview_questions_are_recognised_at_the_rate_the_evaluation_reports():
-    """docs/QUALITY_EVAL.md reports recall on these; this keeps the number honest if the patterns change."""
+def test_the_shipped_overview_questions_are_recognised_as_the_evaluation_reports():
+    """docs/QUALITY_EVAL.md reports recall on these. They were the development set for the widened patterns, so this
+    number guards against regressions; it is not an independent measurement."""
     questions = [
         json.loads(line)
         for path in sorted(QUESTIONS_DIR.glob("*_overview.jsonl"))
@@ -194,4 +195,59 @@ def test_the_shipped_overview_questions_are_recognised_at_the_rate_the_evaluatio
     ]
     recognised = {q["id"] for q in questions if is_overview_question(q["question"])}
     assert len(questions) == 11
-    assert recognised == {"mo1", "mo2", "mo3", "mo5", "co1", "co2", "co4"}  # 7 of 11
+    # mo4 ("main moving parts outside the React app") is scoped to part of the repository, so it stays unrecognised.
+    assert recognised == {q["id"] for q in questions} - {"mo4"}
+
+
+HELDOUT = json.loads((QUESTIONS_DIR / "classifier_heldout.json").read_text(encoding="utf-8"))
+
+
+def test_heldout_overview_phrasings():
+    """Written before the patterns were widened: 2 of 20 were recognised then. After widening, 18 of 20. Because the
+    patterns were written with these items in view, treat 18/20 as a regression guard, not as independent evidence."""
+    missed = sorted(q for q in HELDOUT["overview"] if not is_overview_question(q))
+    assert missed == ["What's in the src directory versus the tests?", "Where does the main logic live, broadly speaking?"]
+
+
+def test_heldout_specific_questions_with_overview_sounding_words_are_not_flagged():
+    flagged = [q for q in HELDOUT["specific"] if is_overview_question(q)]
+    assert flagged == []
+
+
+@pytest.mark.parametrize(
+    ("question", "intent"),
+    [
+        ("What does this project do?", "identity"),
+        ("What is the purpose of this repository?", "purpose"),
+        ("Is this a web app, a library or a CLI tool?", "kind"),
+        ("Give me an overview of the codebase", "overview"),
+        ("How is the code organized?", "structure"),
+        ("What are the key modules in the project?", "parts"),
+        ("Explain how everything fits together.", "fit"),
+        ("Which languages and frameworks does it use?", "stack"),
+        ("I'm new here. Where should I start reading?", "onboarding"),
+        ("How is this software put together?", "structure"),
+    ],
+)
+def test_the_kind_of_overview_question_is_named(question, intent):
+    from codebase_ai.retrieval.query import overview_intent
+
+    assert overview_intent(question) == intent
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Give me an overview of the Kanban board component.",
+        "Give me a tour of the payment module.",
+        "What is the architecture of the cache layer?",
+        "What are the building blocks of the parser?",
+        "Which framework does the router use?",
+        "What languages are supported by the chunker?",
+        "How does everything in the checkout fit together?",
+        "What problem does the rate limiter solve?",
+        "What does the main component of the checkout page render?",
+    ],
+)
+def test_an_overview_word_followed_by_a_narrower_scope_is_not_an_overview(question):
+    assert not is_overview_question(question)

@@ -85,6 +85,18 @@ python eval/run_rerank_eval.py --reranker cross-encoder/ms-marco-MiniLM-L-6-v2 \
 Compares the default retrieval with the same retrieval followed by each `--reranker` (repeatable), question by question,
 and reports the latency cost. The first run of a model downloads it from Hugging Face.
 
+## Classifier phrasing check, release notes, scale (M5)
+
+```bash
+python eval/check_classifier.py my_questions.json     # does the overview classifier recognise YOUR phrasing?
+python eval/run_changelog_eval.py --suite requests path/to/requests eval/questions/requests.jsonl ...
+python eval/scale_test.py --sizes 200,1000,4000        # synthetic repositories, no embedding model
+```
+
+`classifier_heldout.json` holds the held-out classifier cases; it was written before the patterns were widened and by the
+same person, so it guards against regressions rather than proving generalisation. `questions/requests.jsonl` is 24
+questions about `psf/requests` (20 about code, 4 about releases) used by the changelog evaluation.
+
 ## Answer-quality evaluation (M4; needs a model and your key)
 
 `run_answers.py` answers the labelled questions with a real model and scores grounding, citation validity and

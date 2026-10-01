@@ -281,6 +281,7 @@ def search(
                 keyword_weight=settings.keyword_weight,
                 budget_tokens=settings.context_token_budget,
                 test_penalty=settings.test_penalty,
+                changelog_penalty=settings.changelog_penalty,
                 reranker=create_reranker(settings),
                 rerank_top=settings.rerank_top_n,
             )
@@ -556,6 +557,7 @@ def eval_cmd(
                     keyword_weight=weight,
                     budget_tokens=settings.context_token_budget,
                     test_penalty=penalty,
+                    changelog_penalty=settings.changelog_penalty,
                     reranker=reranker,
                     rerank_top=settings.rerank_top_n,
                 )

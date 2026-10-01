@@ -364,3 +364,10 @@ class TestOverviewQuestions:
         monkeypatch.setenv("REPO_MAP_TOKENS", "321")
         answerer = create_answerer(Settings(_env_file=None), built, fake_embedder, ScriptedProvider())
         assert (answerer.condense, answerer.history_turns, answerer.retriever.map_tokens) == (False, 5, 321)
+
+
+def test_the_changelog_setting_reaches_the_retriever(built, fake_embedder, monkeypatch):
+    assert create_answerer(Settings(_env_file=None), built, fake_embedder, ScriptedProvider()).retriever.base.changelog_penalty == 1.0
+    monkeypatch.setenv("CHANGELOG_PENALTY", "0.3")
+    answerer = create_answerer(Settings(_env_file=None), built, fake_embedder, ScriptedProvider())
+    assert answerer.retriever.base.changelog_penalty == 0.3
