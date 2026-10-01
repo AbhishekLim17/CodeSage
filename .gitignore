@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Local indexes, caches, scratch clones
+.codebase_ai/
+.cache/
+scratch/
+
+# Eval outputs
+eval/results/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

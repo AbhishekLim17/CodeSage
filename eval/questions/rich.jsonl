@@ -1,0 +1,23 @@
+{"id": "r01", "type": "explain", "question": "How does the library work out how many terminal columns a piece of text occupies, including wide characters?", "gold_files": ["cells.py"], "gold_symbols": ["cell_len"]}
+{"id": "r02", "type": "explain", "question": "How are the widths of table columns calculated so the table fits the terminal?", "gold_files": ["table.py"], "gold_symbols": ["_calculate_column_widths"]}
+{"id": "r03", "type": "explain", "question": "How does it highlight source code in a syntax-highlighted block?", "gold_files": ["syntax.py"], "gold_symbols": ["Syntax"]}
+{"id": "r04", "type": "explain", "question": "How does the progress display work out how much time is remaining?", "gold_files": ["progress.py"]}
+{"id": "r05", "type": "explain", "question": "How are console markup tags such as bold red in square brackets parsed into styles?", "gold_files": ["markup.py"], "gold_symbols": ["render"]}
+{"id": "r06", "type": "explain", "question": "How does the console detect whether the terminal supports colour?", "gold_files": ["console.py"], "gold_symbols": ["_detect_color_system"]}
+{"id": "r07", "type": "locate", "question": "Where are log records formatted for display by the logging handler?", "gold_files": ["logging.py"], "gold_symbols": ["RichHandler"]}
+{"id": "r08", "type": "explain", "question": "How are exceptions displayed as formatted tracebacks with source code around each frame?", "gold_files": ["traceback.py"], "gold_symbols": ["Traceback"]}
+{"id": "r09", "type": "explain", "question": "How does the live display redraw its output in place?", "gold_files": ["live.py", "live_render.py"], "gold_symbols": ["Live"]}
+{"id": "r10", "type": "explain", "question": "How does the pretty printer break nested data structures across lines?", "gold_files": ["pretty.py"]}
+{"id": "r11", "type": "explain", "question": "How is a style string like bold red on white converted into a style object?", "gold_files": ["style.py"], "gold_symbols": ["parse"]}
+{"id": "r12", "type": "explain", "question": "How is a colour reduced to the nearest colour in a smaller palette?", "gold_files": ["color.py"], "gold_symbols": ["downgrade"]}
+{"id": "r13", "type": "explain", "question": "How are emoji codes written between colons replaced with emoji characters?", "gold_files": ["emoji.py", "_emoji_replace.py"]}
+{"id": "r14", "type": "explain", "question": "How is markdown text converted into styled terminal output?", "gold_files": ["markdown.py"], "gold_symbols": ["Markdown"]}
+{"id": "r15", "type": "explain", "question": "How does a prompt ask the user for input and validate the answer?", "gold_files": ["prompt.py"], "gold_symbols": ["process_response"]}
+{"id": "r16", "type": "explain", "question": "How does the tree display draw its guide lines?", "gold_files": ["tree.py"], "gold_symbols": ["Tree"]}
+{"id": "r17", "type": "explain", "question": "How are ANSI escape codes in a string turned into styled text?", "gold_files": ["ansi.py"], "gold_symbols": ["AnsiDecoder"]}
+{"id": "r18", "type": "explain", "question": "How does the animated status spinner work?", "gold_files": ["spinner.py", "status.py"], "gold_symbols": ["Spinner"]}
+{"id": "r19", "type": "explain", "question": "How are panels drawn with borders and titles?", "gold_files": ["panel.py"], "gold_symbols": ["Panel"]}
+{"id": "r20", "type": "locate", "question": "Where are the box drawing characters used for borders defined?", "gold_files": ["box.py"], "gold_symbols": ["Box"]}
+{"id": "r21", "type": "explain", "question": "How does the layout divide the screen into regions?", "gold_files": ["layout.py"], "gold_symbols": ["Layout"]}
+{"id": "r22", "type": "explain", "question": "How is text wrapped to a given width?", "gold_files": ["text.py", "_wrap.py"], "gold_symbols": ["divide_line"]}
+{"id": "r23", "type": "locate", "question": "How does the library display its objects in Jupyter notebooks?", "gold_files": ["jupyter.py"], "gold_symbols": ["JupyterMixin"]}

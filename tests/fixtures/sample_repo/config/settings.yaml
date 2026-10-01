@@ -1,0 +1,6 @@
+server:
+  host: localhost
+  port: 8080
+database:
+  url: sqlite:///app.db
+  pool_size: 5

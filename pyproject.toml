@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codebase-ai"
+version = "0.1.0"
+description = "Ask natural-language questions about a codebase and get answers that cite files and line ranges (RAG)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic",
+    "pydantic-settings",
+    "pathspec",
+    # tree-sitter 0.26.0's Python binding returns garbage node positions and then crashes the interpreter
+    # (access violation, Windows / CPython 3.13) on ordinary files such as a 385-line Cloud Functions index.js.
+    # 0.25.x is fine. Re-test before lifting this cap.
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-language-pack",
+    "chromadb",
+    "sentence-transformers",
+    "streamlit",
+    "typer",
+    "rich",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic"]
+openai = ["openai"]
+ollama = ["ollama"]
+# The provider tests drive the real vendor SDKs over mocked HTTP, so development needs all three.
+dev = ["pytest", "ruff", "anthropic", "openai", "ollama"]
+
+[project.scripts]
+codebase-ai = "codebase_ai.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
