@@ -886,6 +886,20 @@ def test_the_report_is_written_and_a_mistyped_grade_is_named(analyze, study, tmp
     assert "answers.csv:" in capsys.readouterr().err
 
 
+def test_every_figure_is_drawn_from_the_analysis_tables(analyze, study, tmp_path, capsys):
+    pytest.importorskip("matplotlib")
+    figures = load_script("figures")
+    out = tmp_path / "analysis"
+    args = [str(study["results"]), "--grading", *map(str, study["grading"]), "--judges", *map(str, study["judges"])]
+    assert analyze.main([*args, "--out", str(out)]) == 0
+    assert figures.main([str(out)]) == 0
+    for name in ("primary", "grounded_by_model", "judges", "error_sources", "power"):
+        for suffix in (".png", ".pdf"):
+            assert (out / "figures" / f"{name}{suffix}").stat().st_size > 1000, name
+    (out / "judges.csv").write_text("", encoding="utf-8")  # a table with no data yet is skipped, not an error
+    assert figures.main([str(out), "--no-power"]) == 0 and "no data yet for: judges" in capsys.readouterr().out
+
+
 def test_the_power_simulation_agrees_with_the_hand_estimate(tmp_path):
     import numpy as np
 

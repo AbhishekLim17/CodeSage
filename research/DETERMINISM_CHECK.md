@@ -9,6 +9,7 @@ CPU). Generated with `eval/run_answers.py` and compared with `eval/check_determi
 | Run 1 vs run 2, the second started straight after the first (model still loaded) | **2 of 8** | 4 of 8 (one answer's *grounded* flipped) |
 | Run 1 vs run 3, the model unloaded first (`ollama stop`) | **4 of 4** | 0 |
 | Run 1 today (Ollama 0.40.0) vs the smoke run yesterday (Ollama 0.35.1), both from a freshly loaded model | **8 of 8** | 0 |
+| **With the fix** (`--fresh-model`, decision D11): run A vs run B, the second straight after the first | **4 of 4** | 0 |
 
 **What it means.** The answers are not random: started from a freshly loaded model, with the questions in the same
 order, a run reproduces exactly, across days and across the Ollama update. What changes them is what the model still
@@ -20,10 +21,17 @@ differently (similarity as low as 0.06), and citations and even *grounded* can c
 **Consequence for the study (decision D11 in the protocol).** Each condition is run once, so this is noise rather than
 bias, but it makes a re-run unable to reproduce a result, and it adds disagreement between P0 and P1 that is not caused
 by the prompt (lowering power, see D10). The fix the data points to: unload the model before every answer
-(Ollama's `keep_alive: 0`), which makes each answer depend only on its own prompt, at the cost of one model load per
-answer (seconds, against 80 to 250 seconds per answer). The same applies to the judges.
+(Ollama's `keep_alive: 0`), which makes each answer depend only on its own prompt. The same applies to the judges.
 
-The three reports below are the tool's output, unchanged.
+**The fix, built and checked (2026-10-07).** `run_answers.py --fresh-model` (always on in `run_matrix.py`;
+`judge_claims.py` always reloads its judge) sends `keep_alive: 0`. Two runs straight after each other then gave the
+same 4 answers, word for word, for both models (report 4), where the same comparison without the fix matched 2 of 8.
+It also confirms the cause: the first question of each run, which started cold both times, matches the run of
+yesterday; the second, answered cold now but straight after the first then, does not. Time on these 4 answers ranged
+from 10% less to 27% more than without the fix (the cache no longer saves re-reading the shared start of the prompt,
+and the model loads each time); too few answers to estimate the cost closely.
+
+The reports below are the tool's output, unchanged.
 
 
 ## Report 1: run 1 vs run 2 (straight after)
@@ -190,3 +198,59 @@ Model `llama3.1:8b`, prompt P1: **2 of 2 answers identical**; scores changed for
 |---|---|---|---|---|
 | j01 | yes | 1.000 |  | - |
 | j02 | yes | 1.000 |  | - |
+
+## Report 4: with the fix (--fresh-model): run A vs run B straight after, and run 1 vs run A
+
+The last two sections compare run 1 (no fix, second question answered warm) with run A (fix, every question cold).
+
+### httpx_freshA.json vs httpx_freshB.json
+
+Model `qwen2.5-coder:7b`, prompt P1: **2 of 2 answers identical**; scores changed for 0.
+
+| Question | Identical | Similarity | First difference at character | Scores that changed |
+|---|---|---|---|---|
+| h01 | yes | 1.000 |  | - |
+| h02 | yes | 1.000 |  | - |
+
+### httpx_freshA.json vs httpx_freshB.json
+
+Model `llama3.1:8b`, prompt P1: **2 of 2 answers identical**; scores changed for 0.
+
+| Question | Identical | Similarity | First difference at character | Scores that changed |
+|---|---|---|---|---|
+| h01 | yes | 1.000 |  | - |
+| h02 | yes | 1.000 |  | - |
+
+### httpx_run1.json vs httpx_freshA.json
+
+Model `qwen2.5-coder:7b`, prompt P1: **1 of 2 answers identical**; scores changed for 0.
+
+| Question | Identical | Similarity | First difference at character | Scores that changed |
+|---|---|---|---|---|
+| h01 | yes | 1.000 |  | - |
+| h02 | no | 0.351 | 87 | - |
+
+**h02**, where the two answers part:
+
+```text
+first:  ...e `DigestAuth` class in `_auth.py`. The authentication flow is handled by the `auth_flow` method [1]...
+second: ...e `DigestAuth` class in `_auth.py`. The class handles the authentication flow, including parsing the...
+```
+
+### httpx_run1.json vs httpx_freshA.json
+
+Model `llama3.1:8b`, prompt P1: **1 of 2 answers identical**; scores changed for 0.
+
+| Question | Identical | Similarity | First difference at character | Scores that changed |
+|---|---|---|---|---|
+| h01 | yes | 1.000 |  | - |
+| h02 | no | 0.484 | 216 | - |
+
+**h02**, where the two answers part:
+
+```text
+first:  ..._flow` which is a generator that yields a request and then waits for a response. If the response is ...
+second: ..._flow` which is a generator that yields the request and response objects. 
+
+In the `auth_flow` metho...
+```

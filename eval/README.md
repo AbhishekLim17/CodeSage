@@ -170,7 +170,12 @@ own dependencies already bring in (sentence-transformers and Streamlit); nothing
 ```bash
 python eval/analyze.py eval/results/matrix --grading grading/HG-A grading/HG-C --judges labels/*.jsonl --out analysis
 python eval/power_simulation.py --out-md research/POWER_SIMULATION.md
+python eval/figures.py analysis          # analysis/figures/*.png and *.pdf; needs matplotlib (pip install -e ".[figures]")
 ```
+
+`figures.py` draws one figure per question the analysis answers (the primary comparisons with their intervals, H1 by
+model, the judges, RQ4's error sources, and H2's power), each only when its table has data. Colours come from a palette
+checked for colour-blind separation; series in its lowest-contrast colour are labelled directly.
 
 **Determinism** (research plan, step 3.9). Answer the same questions twice with the same frozen retrieval, then compare:
 `check_determinism.py` says per question whether the answer is identical, how similar it is, where the two first part,
