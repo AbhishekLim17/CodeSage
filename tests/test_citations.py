@@ -71,12 +71,26 @@ def test_no_citations_means_not_grounded():
     assert report.uncited == (1, 2, 3)
 
 
-def test_marker_to_a_missing_source_is_removed_and_reported():
+def test_marker_to_a_missing_source_becomes_a_question_mark_and_is_reported():
+    # Deleting it would leave "...emails them." or, seen for real, "is enforced in [2][3] and in."
     report = check("It saves the user [1] and emails them [7].")
     assert report.cited == (1,)
     assert report.invalid == (7,)
-    assert report.clean_text == "It saves the user [1] and emails them."
+    assert report.clean_text == "It saves the user [1] and emails them [?]."
     assert report.validity == 0.5
+
+
+@pytest.mark.parametrize(
+    ("text", "clean"),
+    [
+        ("Claim [1][9].", "Claim [1]."),  # next to a valid citation, the bad one simply goes
+        ("Claim [9][Source 1].", "Claim [Source 1]."),
+        ("Claim [7][8].", "Claim [?]."),  # several bad ones in a row say no more than one
+        ("Claim [7], also [8].", "Claim [?], also [?]."),
+    ],
+)
+def test_invalid_markers_next_to_others(text, clean):
+    assert check(text).clean_text == clean
 
 
 def test_partly_valid_marker_keeps_the_valid_numbers():
@@ -89,7 +103,7 @@ def test_partly_valid_marker_keeps_the_valid_numbers():
 def test_zero_is_not_a_source():
     report = check("Nothing here [0].")
     assert report.invalid == (0,)
-    assert report.clean_text == "Nothing here."
+    assert report.clean_text == "Nothing here [?]."
 
 
 def test_only_invalid_markers_leave_it_ungrounded_with_zero_validity():
@@ -201,7 +215,7 @@ def test_no_sources_at_all():
     assert report.invalid == (1,)
     assert report.cited == ()
     assert report.uncited == ()
-    assert report.clean_text == "Claim."
+    assert report.clean_text == "Claim [?]."
 
 
 def test_empty_text():

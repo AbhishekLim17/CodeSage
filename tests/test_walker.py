@@ -125,6 +125,13 @@ def test_minified_files_are_skipped(tmp_path):
     assert files == [] and report.skipped["minified_or_generated"] == 1
 
 
+def test_documents_written_one_paragraph_per_line_are_kept(tmp_path):
+    # Seen for real: a project's CLAUDE.md with one 2,056-character bullet was dropped as "minified".
+    write(tmp_path, "CLAUDE.md", "# Notes\n\n- " + "a long sentence about the design " * 70 + "\n")
+    files, report = walk(tmp_path)
+    assert [f.path for f in files] == ["CLAUDE.md"] and not report.skipped
+
+
 @pytest.mark.parametrize("name", ["package-lock.json", "yarn.lock", "poetry.lock", "app.min.js", "go.sum"])
 def test_lockfiles_and_generated_files_are_skipped(tmp_path, name):
     write(tmp_path, name, "{}\n")

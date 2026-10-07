@@ -71,21 +71,42 @@ Code files that describe themselves (first line of their header comment or docst
   ...
 ```
 
-**Ask.** `ask` needs a language model, so this README cannot show a real answer: no model was run while it was written. This is the *layout* of what `ask` prints (the answer text is deliberately left out):
+**Ask.** A real answer, produced fully offline by `qwen2.5-coder:7b` through Ollama on a laptop with a 4 GB GPU (unedited, except that the list of uncited sources is shortened):
 
 ```text
-$ codebase-ai ask https://github.com/psf/requests "How does a redirect get followed?"
-Note: your question and <n> retrieved code excerpt(s) are sent to <provider> (<model>).
-<the answer streams here, citing the sources it used as [1], [2], ...>
+$ codebase-ai ask https://github.com/psf/requests "How does a redirect get followed, and what limits how many redirects are followed?" --provider ollama
+A redirect is followed by the `resolve_redirects` method in the `SessionRedirectMixin` class [5]. This method is called
+by the `send` method of the `Session` class when a redirect is detected [15].
+
+The `resolve_redirects` method follows redirects by repeatedly calling `get_redirect_target` to get the new URL from the
+`Location` header of the response [1]. It then creates a new `PreparedRequest` with the new URL and sends it back to the
+server [6].
+
+The number of redirects that can be followed is limited by the `max_redirects` attribute of the `SessionRedirectMixin`
+class [2]. If the number of redirects exceeds this limit, a `TooManyRedirects` exception is raised [3].
+
+This limit is checked in the `resolve_redirects` method before each redirect is followed [5]. If the limit is reached,
+the method raises the `TooManyRedirects` exception [5].
 
 Sources cited
-  [1] <path>:<first line>-<last line>  <what it is>
+  [5] src/requests/sessions.py:186-245  method SessionRedirectMixin.resolve_redirects
+  [15] tests/test_lowlevel.py:308-339  function test_redirect_rfc1808_to_non_ascii_location
+  [1] src/requests/sessions.py:134-152  method SessionRedirectMixin.get_redirect_target
+  [6] src/requests/sessions.py:286-307  method SessionRedirectMixin.resolve_redirects
+  [2] src/requests/sessions.py:127-130  class header SessionRedirectMixin
+  [3] src/requests/exceptions.py:106-107  class TooManyRedirects
+
 Also retrieved (not cited)
-  [2] ...
-<provider> <model>, <n> tokens in / <n> out; retrieval <s>s, answer <s>s
+  [4] HISTORY.md:441-560  doc_section
+  [7] src/requests/models.py:883-889  method Response.is_permanent_redirect
+  ... 8 more
+
+ollama qwen2.5-coder:7b, 3947 tokens in / 198 out; retrieval 9.9s, answer 98.1s
 ```
 
-It also prints a warning when an answer cites nothing, cites a source that does not exist (that citation is removed), mentions a file or line range it was never shown, was cut off, or was declined. `codebase-ai serve` is the same thing as a chat page that streams the answer and shows the cited code beside it.
+**Read it the way you should read any answer here.** The mechanism is right and every location is real. But citation `[15]` is a test, not `Session.send`, so it does not support its sentence; `[2]` is a four-line class header that may not show `max_redirects`; and the default limit (30) is not mentioned. Every `[n]` is checked against what was supplied, not against what the sentence claims: that is what clicking through to the cited code is for.
+
+`ask` prints a warning when an answer cites nothing, cites a source that does not exist (shown as `[?]`), mentions a file or line range it was never shown, was cut off, or was declined. With a hosted provider it first says that code is about to be sent and where. `codebase-ai serve` is the same thing as a chat page that streams the answer and shows the cited code beside it.
 
 ## Status
 
@@ -95,12 +116,12 @@ It also prints a warning when an answer cites nothing, cites a source that does 
 | **M1** ingest, chunk, index; embedding-model benchmark | done |
 | **M2** retrieval, token budget, evaluation harness | done |
 | **M3** cited answers, LLM providers, Streamlit UI | done |
-| **M4** quality: repo map, follow-ups, reranker, answer-quality harness | done, with caveats |
+| **M4** quality: repo map, follow-ups, reranker, answer-quality harness | done; answer quality measured with a local model, follow-ups still untested live |
 | **M5** polish: git URLs, demo README, final report | done |
 
 The design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The evidence behind every default, what worked, what did not and what was never measured, is in [`docs/FINAL_REPORT.md`](docs/FINAL_REPORT.md).
 
-**What was and was not tested.** About 960 automated tests pass, on Ubuntu (Python 3.11 and 3.13) and Windows (3.13) in CI, offline and without an API key. The three LLM provider adapters are tested against the real vendor SDKs over mocked HTTP, and the app is tested headless and by hand in a browser against real indexes. **No language model was ever run against this system**: no API key was used and no local model is installed. So the answers themselves, follow-up rewriting, and the answer-quality evaluation with its faithfulness judge are built and tested with scripted stand-ins only. Retrieval, indexing, the repository map and git cloning have been run for real. To see real answers you need your own key (below); if a provider misbehaves, the error says which one and what kind of failure it was.
+**What was and was not tested.** About 980 automated tests pass, on Ubuntu (Python 3.11 and 3.13) and Windows (3.13) in CI, offline and without an API key. Retrieval, indexing, the repository map and git cloning have been run for real, and so has answering: **30 questions were answered fully offline by `qwen2.5-coder:7b` through Ollama** (results in [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) section 3). **Claude and OpenAI have not been run live**: their adapters are tested against the real vendor SDKs over mocked HTTP only, and follow-up rewriting has only been tested with scripted models. If a provider misbehaves, the error says which one and what kind of failure it was.
 
 ## Install
 
@@ -142,11 +163,11 @@ Indexes and clones live in `~/.codebase_ai/` (set `INDEX_DIR` to change it).
 ## What it does
 
 - **Code-aware chunking** (tree-sitter): one chunk per function, class, method or type, with symbol names and exact line ranges. Python, JavaScript/JSX, TypeScript/TSX, Java and Go; Markdown by heading; everything else in overlapping line windows.
-- **Safe ingestion:** honours nested `.gitignore` files, never follows symlinks, skips binaries, lockfiles and minified files, and keeps secret files and token-shaped strings out of the index.
+- **Safe ingestion:** honours nested `.gitignore` files, never follows symlinks, skips binaries, lockfiles and minified code, and keeps secret files and token-shaped strings out of the index. Says so when a folder has nothing to search.
 - **Git URLs** (`https` and `ssh` only): shallow clone, no hooks, no submodules, no LFS, never prompts for a password, refuses URLs that contain credentials, and never deletes anything.
 - **Incremental, crash-safe indexing** by file hash; refuses to mix embeddings from different models.
-- **Retrieval you can cite:** vector search by default, test files demoted, merged into exact `path:start-end` sources that fit a token budget. Keyword and hybrid modes exist; the evaluation found neither beat plain vector search.
-- **Answers you can check:** the model is told to answer only from numbered sources and cite them; every `[n]` is validated against what was retrieved, invented citations are removed and reported, and a `path:line` the model was never shown is flagged. A valid citation means the source was supplied, not that it proves the claim.
+- **Retrieval you can cite:** vector search by default, test files demoted, merged into exact `path:start-end` sources that fit a token budget. Keyword and hybrid modes exist; the evaluation found neither beat plain vector search. `search` lists exactly what `ask` would give the model.
+- **Answers you can check:** the model is told to answer only from numbered sources and cite them; every `[n]` is validated against what was retrieved, invented citations are shown as `[?]` and reported, and a `path:line` the model was never shown is flagged. A valid citation means the source was supplied, not that it proves the claim. If the model cannot be reached (no key, Ollama not running), you still get the code it would have answered from.
 - **Provider-agnostic:** Claude, OpenAI or Ollama behind one streaming interface, with errors that never contain your key and a note before any code is sent to a hosted provider. Ollama on another machine counts as hosted.
 - **Whole-project questions** get a generated repository map and the README; **follow-ups** are rewritten into standalone questions (and the rewrite is shown).
 - **Streamlit chat** with streaming, cited code beside each answer, indexing progress, and an explicit state for every failure.
@@ -163,12 +184,13 @@ Indexes and clones live in `~/.codebase_ai/` (set `INDEX_DIR` to change it).
 | Does a repository map help whole-project questions? | Areas shown rose from 63% to 93% on 11 questions; recognising such questions was the weak part (2 of 20 fresh phrasings at first, 18 of 20 after widening, which is not independent) | [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) |
 | Does a cross-encoder reranker help? | No: -0.037 MRR, about 2 s slower per query (one small model tried) | same |
 | Does demoting changelogs help? | No measurable effect (1 of 109 questions moved by one rank); off | same |
+| Does it work on code it was never tuned on? | Yes: 36 questions written blind on `httpx` and `jinja2`, MRR 0.915 and 0.801, the right file in context every time | same |
 | Does it scale? | Linear up to 4,000 files / 28,000 chunks (63 s, 85 MB, 10 ms search) without the embedding model; the real model needs about an hour for that size on a CPU (extrapolated) | same |
-| Are the answers faithful to the cited code? | **Not measured**: needs a live model; the harness is built | same |
+| Are the answers right, and do they cite their code? | Measured with a local 7B model, offline: no invented citation or location in 30 answers; a one-line reminder raised answers with citations from 40% to 100% on held-out questions; hand-graded, 14 of 20 correct, 4 partly, 2 wrong (both faithful to plausible but wrong code) | same |
 
 ## Limitations
 
-- **No live-model verification** (above). Answer quality, follow-up rewriting and the judge are untested against a real model.
+- **Answer quality is measured on 30 questions with one small local model only.** Claude and OpenAI were not run live, follow-up rewriting has never met a real model, and the correctness grades were given by the AI assistant that built the system, not by an independent reader. A wrong answer can still be faithful: if retrieval supplies dead or unrelated code, the model describes it accurately (seen twice in 20).
 - **Prose can outrank code.** On `psf/requests` the changelog ranked above `sessions.py` for a question about redirects. Demoting release notes made no measurable difference over 24 `requests` questions and 85 others, so it is off; long guides can still outrank code, which is sometimes the right answer.
 - **Small, partly self-written question sets.** 85 retrieval questions and 11 overview questions over three repositories; two were labelled by the author of the system. Treat the direction of each result as credible and the exact percentages as rough.
 - **Languages.** Tree-sitter chunking covers Python, JavaScript/TypeScript, Java and Go. Other languages are indexed in line windows, which works but cuts at arbitrary points.

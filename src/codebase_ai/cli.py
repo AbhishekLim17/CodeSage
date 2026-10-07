@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -92,6 +94,7 @@ def _repo(text: str, settings: Settings, *, fetch: bool = False, branch: str | N
     """
     from codebase_ai.ingest.git_source import (
         GitSourceError,
+        check_branch,
         clone_dir_for,
         looks_like_url,
         parse_git_url,
@@ -107,8 +110,9 @@ def _repo(text: str, settings: Settings, *, fetch: bool = False, branch: str | N
         return path.resolve()
     try:
         remote = parse_git_url(text)
+        check_branch(branch)
     except GitSourceError as exc:
-        raise _fail(str(exc), 2) from exc  # a URL that is not acceptable is a usage error
+        raise _fail(str(exc), 2) from exc  # a URL or branch that is not acceptable is a usage error
     if fetch:
         console.print(f"Fetching {remote.display} (shallow clone)...", markup=False)
         try:
@@ -126,6 +130,20 @@ def _shown(text: str, repo: Path) -> str:
     from codebase_ai.ingest.git_source import looks_like_url
 
     return text if looks_like_url(text) else str(repo)
+
+
+@contextmanager
+def _built_index(repo_arg: str, repo: Path, settings: Settings) -> Iterator:
+    """Open a repository's index for one command, failing with a hint if it has not been built; always closed."""
+    from codebase_ai.index.indexer import RepoIndex
+
+    repo_index = RepoIndex(repo, settings.index_dir)
+    try:
+        if not repo_index.is_built():
+            raise _fail(f"No index for {_shown(repo_arg, repo)}. Run: codebase-ai index {_shown(repo_arg, repo)}")
+        yield repo_index
+    finally:
+        repo_index.close()
 
 
 def _limits(settings: Settings):
@@ -168,6 +186,7 @@ def index(
                 status.update(f"Indexing... {r.files_indexed} files changed/new, {r.chunks_added} chunks")
 
             report = indexer.run(full=full, progress=progress)
+        searchable = repo_index.keyword.count()
     except (IndexMismatchError, EmbeddingError) as exc:
         raise _fail(str(exc)) from exc
     finally:
@@ -193,19 +212,16 @@ def index(
         console.print(skipped)
     if settings.embedding_provider == "openai":
         console.print("[yellow]Note: chunk text was sent to OpenAI to compute embeddings.[/yellow]")
+    if searchable == 0:
+        raise _fail(f"Nothing to search: no source code or documentation was found in {repo}. Is it the right folder?")
 
 
 @app.command()
 def stats(repo_arg: RepoArg) -> None:
     """Show what is stored in a repository's index."""
-    from codebase_ai.index.indexer import RepoIndex
-
     settings = _settings()
     repo = _repo(repo_arg, settings)
-    repo_index = RepoIndex(repo, settings.index_dir)
-    try:
-        if not repo_index.is_built():
-            raise _fail(f"No index for {_shown(repo_arg, repo)}. Run: codebase-ai index {_shown(repo_arg, repo)}")
+    with _built_index(repo_arg, repo, settings) as repo_index:
         info = repo_index.info()
         table = Table(title=f"Index for {repo.name}", show_header=False)
         table.add_row("Location", str(repo_index.dir))
@@ -215,8 +231,6 @@ def stats(repo_arg: RepoArg) -> None:
         table.add_row("Files indexed", str(len(repo_index.manifest.files())))
         table.add_row("Chunks (keyword / vector)", f"{repo_index.keyword.count()} / {repo_index.vectors.count()}")
         console.print(table)
-    finally:
-        repo_index.close()
 
 
 @app.command()
@@ -258,44 +272,33 @@ def search(
     ] = None,
     text: Annotated[bool, typer.Option("--text", help="Print each source's full text.")] = False,
 ) -> None:
-    """Retrieve the code that best answers a query: ranked, merged, cited as path:start-end."""
+    """Retrieve the code that best answers a query: ranked, merged, cited as path:start-end.
+
+    The sources are exactly what `ask` would give the model, including the repository map for whole-project questions.
+    """
     from codebase_ai.index.embedder import EmbeddingError, create_embedder
-    from codebase_ai.index.indexer import RepoIndex
+    from codebase_ai.rag.answerer import create_retriever
     from codebase_ai.retrieval.reranker import create_reranker
-    from codebase_ai.retrieval.retriever import RetrievalError, Retriever
+    from codebase_ai.retrieval.retriever import RetrievalError
 
     settings = _settings()
     repo = _repo(repo_arg, settings)
     chosen = mode.value if mode is not None else settings.retrieval_mode
-    repo_index = RepoIndex(repo, settings.index_dir)
-    try:
-        if not repo_index.is_built():
-            raise _fail(f"No index for {_shown(repo_arg, repo)}. Run: codebase-ai index {_shown(repo_arg, repo)}")
+    with _built_index(repo_arg, repo, settings) as repo_index:
         try:
             embedder = None if chosen == "keyword" else create_embedder(settings)
-            retriever = Retriever(
-                repo_index,
-                embedder,
-                mode=chosen,  # type: ignore[arg-type]
-                top_k=settings.retrieve_top_k,
-                keyword_weight=settings.keyword_weight,
-                budget_tokens=settings.context_token_budget,
-                test_penalty=settings.test_penalty,
-                changelog_penalty=settings.changelog_penalty,
-                reranker=create_reranker(settings),
-                rerank_top=settings.rerank_top_n,
-            )
+            retriever = create_retriever(settings, repo_index, embedder, mode=chosen, reranker=create_reranker(settings))
             result = retriever.retrieve(query)
         except (EmbeddingError, RetrievalError) as exc:
             raise _fail(str(exc)) from exc
-    finally:
-        repo_index.close()
 
     if not result.sources:
         console.print("No results.")
         return
+    if result.overview:
+        console.print("A question about the whole project: the generated repository map is added.", markup=False)
     for number, source in enumerate(result.sources[:k], start=1):
-        label = "context" if source.role == "context" else "/".join(source.kinds)
+        label = source.role if source.role in ("context", "map") else "/".join(source.kinds)
         console.print(f"{number:>2}. {source.location}  [{label}] {', '.join(source.symbols)}", markup=False, highlight=False)
         if text:
             console.print(source.text, markup=False, highlight=False)
@@ -346,7 +349,6 @@ def ask(
 ) -> None:
     """Ask a question about an indexed repository; the answer cites the code it is based on by number."""
     from codebase_ai.index.embedder import EmbeddingError, create_embedder
-    from codebase_ai.index.indexer import RepoIndex
     from codebase_ai.llm.base import ProviderError, create_provider
     from codebase_ai.rag.answerer import create_answerer
     from codebase_ai.retrieval.reranker import create_reranker
@@ -357,10 +359,7 @@ def ask(
     if not question.strip():
         raise _fail("The question is empty.", 2)
     chosen = mode.value if mode is not None else settings.retrieval_mode
-    repo_index = RepoIndex(repo, settings.index_dir)
-    try:
-        if not repo_index.is_built():
-            raise _fail(f"No index for {_shown(repo_arg, repo)}. Run: codebase-ai index {_shown(repo_arg, repo)}")
+    with _built_index(repo_arg, repo, settings) as repo_index:
         try:
             llm = create_provider(
                 settings, provider=provider.value if provider is not None else None, model=model
@@ -370,8 +369,6 @@ def ask(
             stream = answerer.stream(question)  # retrieval happens here, before anything is sent to the model
         except (ProviderError, EmbeddingError, RetrievalError) as exc:
             raise _fail(str(exc)) from exc
-    finally:
-        repo_index.close()
 
     if stream.sources and llm.sends_code_off_machine:
         err_console.print(
@@ -383,6 +380,12 @@ def ask(
             console.print(piece, end="", markup=False, highlight=False, soft_wrap=True)
     except ProviderError as exc:
         console.print()
+        if not stream.text_so_far:  # no answer, but the search itself worked: show where the answer lives
+            from codebase_ai.rag.context import describe_source
+
+            console.print("No answer was generated. The code it would have been based on:", markup=False)
+            for number, source in enumerate(stream.sources, start=1):
+                console.print(f"  [{number}] {source.location}  {describe_source(source)}", markup=False, highlight=False)
         detail = "" if not stream.text_so_far else " The answer above is incomplete."
         raise _fail(f"{exc}{detail}") from exc
     console.print()
@@ -460,7 +463,13 @@ def serve(
         # is imported it also floods the log with tracebacks from transformers' lazily loaded modules.
         "--server.fileWatcherType",
         "none",
+        # A local tool has nothing to deploy: hide Streamlit's Deploy button and its in-app promotions.
+        "--client.toolbarMode",
+        "minimal",
+        "--logger.hideWelcomeMessage",
+        "true",
     ]
+    console.print(f"Codebase Q&A is starting at http://{host}:{port} (press Ctrl+C to stop).", markup=False)
     try:
         code = subprocess.call(command, env=env)
     except KeyboardInterrupt:
@@ -516,9 +525,9 @@ def eval_cmd(
 
     from codebase_ai.evaluation import evaluate, load_questions, symbol_lookup_questions
     from codebase_ai.index.embedder import EmbeddingError, create_embedder
-    from codebase_ai.index.indexer import RepoIndex
+    from codebase_ai.rag.answerer import create_retriever
     from codebase_ai.retrieval.reranker import create_reranker
-    from codebase_ai.retrieval.retriever import MODES, RetrievalError, Retriever
+    from codebase_ai.retrieval.retriever import MODES, RetrievalError
 
     settings = _settings()
     repo = _repo(repo_arg, settings)
@@ -534,10 +543,7 @@ def eval_cmd(
     weight = settings.keyword_weight if keyword_weight is None else keyword_weight
     penalty = settings.test_penalty if test_penalty is None else test_penalty
     lookups = symbol_lookup_questions(loaded) if symbol_lookups else []
-    repo_index = RepoIndex(repo, settings.index_dir)
-    try:
-        if not repo_index.is_built():
-            raise _fail(f"No index for {_shown(repo_arg, repo)}. Run: codebase-ai index {_shown(repo_arg, repo)}")
+    with _built_index(repo_arg, repo, settings) as repo_index:
         indexed = set(repo_index.manifest.files())
         missing = sorted({f for q in loaded for f in (*q.gold_files, *q.acceptable_files)} - indexed)
         if missing:
@@ -549,17 +555,15 @@ def eval_cmd(
             embedder = create_embedder(settings) if any(m != "keyword" for m in wanted) else None
             reranker = create_reranker(settings)
             retrievers = {
-                mode: Retriever(
+                mode: create_retriever(
+                    settings,
                     repo_index,
                     embedder,
-                    mode=mode,  # type: ignore[arg-type]
-                    top_k=settings.retrieve_top_k,
-                    keyword_weight=weight,
-                    budget_tokens=settings.context_token_budget,
-                    test_penalty=penalty,
-                    changelog_penalty=settings.changelog_penalty,
+                    mode=mode,
                     reranker=reranker,
-                    rerank_top=settings.rerank_top_n,
+                    keyword_weight=weight,
+                    test_penalty=penalty,
+                    overview=False,  # scores search alone; the map has its own evaluation
                 )
                 for mode in wanted
             }
@@ -567,8 +571,6 @@ def eval_cmd(
             lookup_reports = [evaluate(r, lookups, name=mode) for mode, r in retrievers.items()] if lookups else []
         except (EmbeddingError, RetrievalError) as exc:
             raise _fail(str(exc)) from exc
-    finally:
-        repo_index.close()
 
     setting_note = f"keyword weight {weight:g} in hybrid, test demotion x{penalty:g}"
     console.print(_eval_table(f"{repo.name}: {len(loaded)} questions ({setting_note})", reports))

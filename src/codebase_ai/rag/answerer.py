@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from codebase_ai.llm.base import FinishReason, LLMProvider, Message, StreamDone, TextDelta, Usage
 from codebase_ai.rag.citations import CitationReport, validate_citations
 from codebase_ai.rag.prompts import (
+    CITATION_REMINDER,
     NO_CONTEXT_ANSWER,
     REFUSAL_ANSWER,
     SYSTEM_PROMPT,
@@ -49,7 +50,7 @@ class Answer:
     """A finished answer with everything needed to check it: the sources it was given and how it cited them."""
 
     question: str
-    text: str  # with citation markers to non-existent sources removed
+    text: str  # with citations to non-existent sources taken out (an emptied marker shows [?])
     raw_text: str  # exactly what the model wrote
     sources: tuple[Source, ...]  # numbered from 1; ``sources[n - 1]`` is what ``[n]`` refers to
     citations: CitationReport
@@ -105,7 +106,7 @@ class Answer:
             notes.append("This answer cites no retrieved code, so treat it as unverified.")
         if self.citations.invalid:
             markers = ", ".join(f"[{n}]" for n in self.citations.invalid)
-            notes.append(f"The answer cited sources that do not exist ({markers}); those citations were removed.")
+            notes.append(f"The answer cited sources that do not exist ({markers}); they are shown as [?].")
         if self.citations.unverified_locations:
             listed = ", ".join(self.citations.unverified_locations)
             notes.append(f"The answer mentions locations that do not match the retrieved code: {listed}.")
@@ -161,7 +162,7 @@ class AnswerStream:
             self._parts.append(NO_CONTEXT_ANSWER)
             yield NO_CONTEXT_ANSWER
         else:
-            message = Message("user", build_user_message(self.searched_for, self.sources))
+            message = Message("user", build_user_message(self.searched_for, self.sources, self._answerer.reminder))
             for event in provider.stream(
                 self._answerer.system,
                 [message],
@@ -208,6 +209,7 @@ class Answerer:
         max_tokens: int = 16_000,
         temperature: float | None = None,
         system: str = SYSTEM_PROMPT,
+        reminder: str | None = CITATION_REMINDER,
         condense: bool = True,
         history_turns: int = 3,
     ) -> None:
@@ -216,6 +218,7 @@ class Answerer:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.system = system
+        self.reminder = reminder  # the line after the question; None leaves it out (the study's P0 prompt)
         self.condense = condense
         self.history_turns = history_turns
 
@@ -240,6 +243,40 @@ class Answerer:
         return stream.answer
 
 
+def create_retriever(
+    settings: Settings,
+    index: RepoIndex,
+    embedder: Embedder | None,
+    *,
+    mode: str | None = None,
+    reranker: Reranker | None = None,
+    budget_tokens: int | None = None,
+    keyword_weight: float | None = None,
+    test_penalty: float | None = None,
+    overview: bool = True,
+) -> Retriever | OverviewRetriever:
+    """The retriever ``ask`` uses, built from settings, so ``search`` can show exactly what a model would be given.
+
+    The keyword arguments override single settings (the evaluation compares them); ``overview=False`` leaves out the
+    repository map that whole-project questions otherwise get.
+    """
+    retriever = Retriever(
+        index,
+        embedder,
+        mode=mode or settings.retrieval_mode,  # type: ignore[arg-type]
+        top_k=settings.retrieve_top_k,
+        keyword_weight=settings.keyword_weight if keyword_weight is None else keyword_weight,
+        budget_tokens=settings.context_token_budget if budget_tokens is None else budget_tokens,
+        test_penalty=settings.test_penalty if test_penalty is None else test_penalty,
+        changelog_penalty=settings.changelog_penalty,
+        reranker=reranker,
+        rerank_top=settings.rerank_top_n,
+    )
+    if overview and settings.use_repo_map:
+        return OverviewRetriever(retriever, map_tokens=settings.repo_map_tokens)
+    return retriever
+
+
 def create_answerer(
     settings: Settings,
     index: RepoIndex,
@@ -251,21 +288,8 @@ def create_answerer(
 ) -> Answerer:
     """Wire a retriever and a provider together from settings, sizing the context to what the provider can take."""
     budget = context_budget_for(provider, settings.context_token_budget, settings.answer_max_tokens)
-    retriever = Retriever(
-        index,
-        embedder,
-        mode=mode or settings.retrieval_mode,  # type: ignore[arg-type]
-        top_k=settings.retrieve_top_k,
-        keyword_weight=settings.keyword_weight,
-        budget_tokens=budget,
-        test_penalty=settings.test_penalty,
-        changelog_penalty=settings.changelog_penalty,
-        reranker=reranker,
-        rerank_top=settings.rerank_top_n,
-    )
-    wrapped = OverviewRetriever(retriever, map_tokens=settings.repo_map_tokens) if settings.use_repo_map else retriever
     return Answerer(
-        wrapped,
+        create_retriever(settings, index, embedder, mode=mode, reranker=reranker, budget_tokens=budget),
         provider,
         max_tokens=settings.answer_max_tokens,
         temperature=settings.answer_temperature,

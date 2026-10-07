@@ -1,0 +1,18 @@
+{"id": "h01", "type": "explain", "question": "How does the client follow redirects, and where is the maximum number of redirects enforced?", "gold_files": ["_client.py"], "gold_symbols": ["_send_handling_redirects"]}
+{"id": "h02", "type": "explain", "question": "How is HTTP Digest authentication implemented?", "gold_files": ["_auth.py"], "gold_symbols": ["DigestAuth"]}
+{"id": "h03", "type": "explain", "question": "How are timeouts configured, and what are the default connect, read, write and pool values?", "gold_files": ["_config.py"], "gold_symbols": ["Timeout"]}
+{"id": "h04", "type": "locate", "question": "Where are response bodies decompressed for gzip, deflate and brotli content encodings?", "gold_files": ["_decoders.py"], "gold_symbols": ["GZipDecoder"]}
+{"id": "h05", "type": "explain", "question": "How is a multipart form upload with files encoded into the request body?", "gold_files": ["_multipart.py"], "gold_symbols": ["MultipartStream"]}
+{"id": "h06", "type": "locate", "question": "Which class lets me return canned responses without making real network requests?", "gold_files": ["_transports/mock.py"], "gold_symbols": ["MockTransport"]}
+{"id": "h07", "type": "explain", "question": "How can the client call a WSGI application in-process instead of going over the network?", "gold_files": ["_transports/wsgi.py"], "gold_symbols": ["WSGITransport"]}
+{"id": "h08", "type": "explain", "question": "How are proxy settings read from environment variables like HTTP_PROXY and NO_PROXY?", "gold_files": ["_utils.py"], "gold_symbols": ["get_environment_proxies"]}
+{"id": "h09", "type": "explain", "question": "How is a URL string parsed and validated into scheme, host, port and path?", "gold_files": ["_urlparse.py"], "gold_symbols": ["urlparse"]}
+{"id": "h10", "type": "explain", "question": "How are query string parameters stored, merged and encoded?", "gold_files": ["_urls.py"], "gold_symbols": ["QueryParams"]}
+{"id": "h11", "type": "locate", "question": "Where are the HTTP status codes and their reason phrases defined?", "gold_files": ["_status_codes.py"], "gold_symbols": ["codes"]}
+{"id": "h12", "type": "explain", "question": "What happens when you call raise_for_status on a 404 response, and how is the error message built?", "gold_files": ["_models.py"], "gold_symbols": ["raise_for_status"]}
+{"id": "h13", "type": "explain", "question": "How does the default transport translate httpcore exceptions into httpx exceptions?", "gold_files": ["_transports/default.py"], "gold_symbols": ["map_httpcore_exceptions"]}
+{"id": "h14", "type": "explain", "question": "How are cookies from a response stored and then sent with later requests?", "gold_files": ["_models.py", "_client.py"], "gold_symbols": ["extract_cookies"]}
+{"id": "h15", "type": "locate", "question": "Where is the command-line tool that sends a request and prints the response implemented?", "gold_files": ["_main.py"], "gold_symbols": ["main"]}
+{"id": "h16", "type": "explain", "question": "How is a JSON or form-encoded request body produced from the arguments passed to a request?", "gold_files": ["_content.py"], "gold_symbols": ["encode_request"]}
+{"id": "h17", "type": "explain", "question": "How are connection pool limits like max_connections and keep-alive connections configured?", "gold_files": ["_config.py"], "gold_symbols": ["Limits"]}
+{"id": "h18", "type": "explain", "question": "How does the module-level httpx.get function work without creating a client explicitly?", "gold_files": ["_api.py"], "gold_symbols": ["request"]}

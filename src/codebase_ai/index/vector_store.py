@@ -20,7 +20,9 @@ class VectorStore(Protocol):
 
     def delete(self, ids: Sequence[str]) -> None: ...
 
-    def query(self, embedding: Sequence[float], k: int) -> list[SearchHit]: ...
+    def query(self, embedding: Sequence[float], k: int, paths: Sequence[str] | None = None) -> list[SearchHit]:
+        """The ``k`` nearest chunks; ``paths`` searches only the chunks of those files."""
+        ...
 
     def count(self) -> int: ...
 
@@ -76,12 +78,15 @@ class ChromaVectorStore:
         for i in range(0, len(ids), _WRITE_BATCH):
             self._collection.delete(ids=list(ids[i : i + _WRITE_BATCH]))
 
-    def query(self, embedding: Sequence[float], k: int) -> list[SearchHit]:
+    def query(self, embedding: Sequence[float], k: int, paths: Sequence[str] | None = None) -> list[SearchHit]:
         total = self._collection.count()
-        if total == 0 or k <= 0:
+        if total == 0 or k <= 0 or (paths is not None and not paths):
             return []
         result = self._collection.query(
-            query_embeddings=[list(embedding)], n_results=min(k, total), include=["distances"]
+            query_embeddings=[list(embedding)],
+            n_results=min(k, total),
+            include=["distances"],
+            where={"path": {"$in": list(paths)}} if paths else None,  # filtered before the search, not after
         )
         return [
             SearchHit(chunk_id=chunk_id, score=1.0 - float(distance))

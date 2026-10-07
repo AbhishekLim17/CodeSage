@@ -41,6 +41,7 @@ class EvalQuestion:
     acceptable_files: tuple[str, ...] = ()
     gold_symbols: tuple[str, ...] = ()
     gold_dirs: tuple[str, ...] = ()
+    key_facts: tuple[str, ...] = ()  # statements a correct answer must contain; shown to human graders
 
     @property
     def lenient_files(self) -> frozenset[str]:
@@ -66,7 +67,7 @@ def load_questions(path: str | Path) -> list[EvalQuestion]:
         if raw["id"] in seen:
             raise ValueError(f"{path}:{number}: duplicate id '{raw['id']}'")
         seen.add(raw["id"])
-        for key in ("gold_files", "acceptable_files", "gold_symbols", "gold_dirs"):
+        for key in ("gold_files", "acceptable_files", "gold_symbols", "gold_dirs", "key_facts"):
             value = raw.get(key, [])
             if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
                 raise ValueError(f"{path}:{number}: '{key}' must be a list of non-empty strings")
@@ -79,6 +80,7 @@ def load_questions(path: str | Path) -> list[EvalQuestion]:
                 acceptable_files=tuple(raw.get("acceptable_files", [])),
                 gold_symbols=tuple(raw.get("gold_symbols", [])),
                 gold_dirs=tuple(raw.get("gold_dirs", [])),
+                key_facts=tuple(raw.get("key_facts", [])),
             )
         )
     if not questions:

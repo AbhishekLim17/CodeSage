@@ -25,6 +25,12 @@ NO_CONTEXT_ANSWER = (
 REFUSAL_ANSWER = "The model declined to answer this request."
 
 
-def build_user_message(question: str, sources: Sequence[Source]) -> str:
-    """The sources (in a delimited, numbered block) followed by the question."""
-    return f"<sources>\n{format_sources(sources)}\n</sources>\n\nQuestion: {question.strip()}"
+# Small local models follow what is nearest the end of the prompt: without this line, qwen2.5-coder:7b wrote a third of
+# its answers with no [n] at all, naming files in prose instead (docs/QUALITY_EVAL.md section 3).
+CITATION_REMINDER = "Answer only from the sources above, and cite every statement about the code with its number, like [1]."
+
+
+def build_user_message(question: str, sources: Sequence[Source], reminder: str | None = CITATION_REMINDER) -> str:
+    """The sources (in a delimited, numbered block), the question, and a reminder to cite (``None``: no reminder)."""
+    message = f"<sources>\n{format_sources(sources)}\n</sources>\n\nQuestion: {question.strip()}"
+    return f"{message}\n\n{reminder}" if reminder else message

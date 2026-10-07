@@ -45,6 +45,9 @@ class CrossEncoderReranker:
             try:
                 from sentence_transformers import CrossEncoder
 
+                from codebase_ai.index.embedder import quiet_model_loading
+
+                quiet_model_loading()
                 # trust_remote_code stays False: never execute code shipped with a downloaded model.
                 self._model = CrossEncoder(self.model_name, max_length=self.max_length, trust_remote_code=False)
             except Exception as exc:

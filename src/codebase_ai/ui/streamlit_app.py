@@ -89,6 +89,8 @@ def load_reranker(model_name: str):
 
 # --- rendering ---------------------------------------------------------------------------------------------------
 
+FOUND_TITLE = "No answer, but this is the code it would have been based on"
+
 
 def render_sources(sources: list[tuple[int, Source]], title: str, *, expanded: bool = False) -> None:
     if not sources:
@@ -130,6 +132,7 @@ def render_turn(turn: dict) -> None:
             st.markdown(escape_math(turn["text"]))
         if turn["error"]:
             st.error(turn["error"])
+        render_sources(turn.get("found", []), FOUND_TITLE)
         if turn["answer"] is not None:
             render_details(turn["answer"])
 
@@ -186,7 +189,11 @@ def ask_and_render(question: str, config: Config, settings: Settings, history: l
             for _ in stream:
                 placeholder.markdown(escape_math(stream.text_so_far) + " ▌")
         except ProviderError as exc:
-            return _stopped_early(turn, stream.text_so_far, placeholder, str(exc))
+            turn = _stopped_early(turn, stream.text_so_far, placeholder, str(exc))
+            if not stream.text_so_far:  # no answer, but the search worked: still show where the answer lives
+                turn["found"] = list(enumerate(stream.sources, start=1))
+                render_sources(turn["found"], FOUND_TITLE)
+            return turn
         except Exception as exc:
             log.exception("Unexpected error while answering")
             return _stopped_early(turn, stream.text_so_far, placeholder, f"{type(exc).__name__}: {exc}")
@@ -258,6 +265,7 @@ def _run_index(
 
             status.update(label="Indexing... (the first run downloads the embedding model)")
             report = indexer.run(full=full, progress=progress)
+            searchable = index.keyword.count()
         except IndexMismatchError as exc:
             status.update(label="Indexing failed", state="error")
             # The message ends with the CLI's advice; here the same thing is a button.
@@ -271,6 +279,9 @@ def _run_index(
             return "error", f"Indexing failed ({type(exc).__name__}): {exc}"
         finally:
             index.close()
+        if searchable == 0:
+            status.update(label="Nothing to index", state="error")
+            return "error", f"Nothing to search: no source code or documentation was found in {repo}. Is it the right folder?"
         status.update(label="Indexing finished", state="complete", expanded=False)
     return "success", (
         f"Indexed {report.files_indexed} new or changed file(s) ({report.files_unchanged} unchanged), "

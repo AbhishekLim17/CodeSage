@@ -128,6 +128,16 @@ def test_a_model_that_fails_to_load_gives_a_readable_error(monkeypatch):
         LocalEmbedder("some/model")._load()
 
 
+def test_loading_a_model_turns_off_its_progress_bars(monkeypatch):
+    # Seen for real: "Loading weights: 100%|####|" landed in the middle of `ask`, `search` and `eval` output.
+    from transformers.utils import logging as transformers_logging
+
+    transformers_logging.enable_progress_bar()
+    monkeypatch.setattr("sentence_transformers.SentenceTransformer", lambda *args, **kwargs: FakeSentenceModel())
+    LocalEmbedder("some/model")._load()
+    assert not transformers_logging.is_progress_bar_enabled()
+
+
 def test_remote_code_is_never_trusted(monkeypatch):
     seen = {}
 

@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from codebase_ai.cli import app
 from codebase_ai.llm.base import ProviderError
 from codebase_ai.llm.base import create_provider as REAL_CREATE_PROVIDER
-from codebase_ai.rag.prompts import NO_CONTEXT_ANSWER
+from codebase_ai.rag.prompts import CITATION_REMINDER, NO_CONTEXT_ANSWER
 from helpers import FakeEmbedder, ScriptedProvider
 
 runner = CliRunner()
@@ -86,7 +86,7 @@ class TestAsk:
     def test_the_question_reaches_the_model_inside_a_sources_block(self, indexed, llm):
         ask(indexed)
         (call,) = llm.provider.calls
-        assert "<sources>" in call["prompt"] and call["prompt"].endswith(f"Question: {QUESTION}")
+        assert "<sources>" in call["prompt"] and call["prompt"].endswith(f"Question: {QUESTION}\n\n{CITATION_REMINDER}")
 
     def test_warnings_are_shown(self, indexed, llm):
         llm.provider = ScriptedProvider("It works [1] and is tested [42].")
@@ -156,6 +156,8 @@ class TestFailures:
         assert result.exit_code == 1
         assert "The API key was rejected." in result.output
         assert "incomplete" not in result.output and "Traceback" not in result.output
+        # The search worked, so the user still learns where the answer lives.
+        assert "The code it would have been based on" in result.output and "[1] web/cart.js:" in result.output
 
     def test_an_error_mid_answer_keeps_the_partial_text_and_says_it_is_incomplete(self, indexed, llm):
         error = ProviderError("The connection dropped.", "connection", provider="scripted", retryable=True)
@@ -166,7 +168,7 @@ class TestFailures:
         assert result.exit_code == 1
         assert "cartTotal ad" in result.output
         assert "The connection dropped." in result.output and "incomplete" in result.output
-        assert "Sources cited" not in result.output
+        assert "Sources cited" not in result.output and "would have been based on" not in result.output
 
     def test_the_real_anthropic_provider_without_a_key_fails_cleanly(self, indexed, monkeypatch):
         monkeypatch.setattr("codebase_ai.llm.base.create_provider", REAL_CREATE_PROVIDER)
@@ -207,6 +209,11 @@ class TestServe:
         assert command[command.index("--server.port") + 1] == "8501"
         assert command[command.index("--browser.gatherUsageStats") + 1] == "false"
         assert command[command.index("--server.fileWatcherType") + 1] == "none"
+        # Streamlit's Deploy button and in-app promotions have no place in a local tool...
+        assert command[command.index("--client.toolbarMode") + 1] == "minimal"
+        assert command[command.index("--logger.hideWelcomeMessage") + 1] == "true"
+        # ...and hiding the welcome message hides Streamlit's own URL line, so the CLI prints it.
+        assert "http://localhost:8501" in result.output
         assert "CODEBASE_AI_REPO" not in call["env"]
 
     def test_the_repo_is_handed_to_the_ui_through_the_environment(self, launched, sample_repo):

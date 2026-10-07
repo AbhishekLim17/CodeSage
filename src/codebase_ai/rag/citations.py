@@ -3,13 +3,14 @@
 Two checks, both done on the finished answer text:
 
 * **Markers.** ``[1]``, ``[1, 2]``, ``[2-4]`` and ``[Source 3]`` must refer to a source that was actually supplied.
-  Markers to sources that do not exist are removed from the text and reported. Brackets inside code (``items[1]``,
+  Numbers that refer to no source are dropped from their marker (a marker left with none becomes ``[?]``) and
+  reported. Brackets inside code (``items[1]``,
   fenced blocks, inline code) are array indexing, not citations, and are left alone.
 * **Locations.** A ``path/to/file.py:12-30`` written in the prose must match a supplied source that contains those
   lines. A file the model never saw, or lines outside what it saw, is reported as unverified.
 
 What this cannot do is check that a cited source actually *supports* the sentence it is attached to; that needs a
-judge (`answer_eval.py`; built, not yet run live). A valid marker means "this source was supplied", not "this claim is true".
+judge (`answer_eval.py`) or a reader. A valid marker means "this source was supplied", not "this claim is true".
 """
 
 from __future__ import annotations
@@ -39,15 +40,19 @@ _LOCATION = re.compile(
     r":(?P<start>\d+)(?:-(?P<end>\d+))?(?!\w)"
 )
 _MAX_RANGE = 50
+INVALID_MARKER = "[?]"  # what a citation to a source that was never supplied becomes in the displayed text
+# "[?]" next to a valid marker adds nothing ("[9][1]" reads as "[1]"), and several in a row say no more than one.
+_REDUNDANT_INVALID = re.compile(r"\[\?\](?=\[(?:sources?\s*)?\d)|(?<=\d\])\[\?\]", re.IGNORECASE)
+_REPEATED_INVALID = re.compile(r"(?:\[\?\]){2,}")
 
 
 @dataclass(frozen=True)
 class CitationReport:
     """What the answer's citations amount to, against the sources that were supplied."""
 
-    clean_text: str  # the answer with markers to non-existent sources removed
+    clean_text: str  # the answer with numbers that refer to no source taken out (a marker left empty shows [?])
     cited: tuple[int, ...]  # valid source numbers, in order of first appearance
-    invalid: tuple[int, ...]  # numbers that matched no supplied source (removed from clean_text)
+    invalid: tuple[int, ...]  # numbers that matched no supplied source (not in clean_text)
     uncited: tuple[int, ...]  # supplied sources the answer never cited
     unverified_locations: tuple[str, ...]  # path:line mentions that match no supplied source
     marker_count: int  # number of citation markers found (each ``[1][2]`` counts twice)
@@ -121,14 +126,16 @@ def validate_citations(text: str, sources: Sequence[Source]) -> CitationReport:
         if len(valid) == len(numbers):
             return match.group()
         if not valid:
-            # Drop the marker with the space in front of it, unless another marker follows and needs that space.
-            return lead if match.string.startswith("[", match.end()) else ""
+            # Deleting the marker would break a sentence like "this is enforced in [42]."; "[?]" keeps it readable and
+            # shows that a citation failed.
+            return f"{lead}{INVALID_MARKER}"
         return f"{lead}[{', '.join(map(str, valid))}]"
 
     def process(chunk: str) -> str:
         nonlocal previous_end
         previous_end = -1
-        return _MARKER.sub(rewrite, chunk)
+        marked = _MARKER.sub(rewrite, chunk)
+        return _REPEATED_INVALID.sub(INVALID_MARKER, _REDUNDANT_INVALID.sub("", marked))
 
     clean = "".join(chunk if is_code else process(chunk) for is_code, chunk in _prose_and_code(text))
 

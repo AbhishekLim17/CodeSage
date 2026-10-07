@@ -139,6 +139,26 @@ def test_search_limits_sources_and_can_print_text(indexed_repo):
     assert "def make_service" in full.output
 
 
+def test_search_shows_the_repository_map_that_ask_adds_for_whole_project_questions(indexed_repo):
+    # `search` is how you check what `ask` hands the model, so it must not leave the map out.
+    result = runner.invoke(app, ["search", str(indexed_repo), "What does this project do?", "-k", "3"])
+    assert result.exit_code == 0, result.output
+    assert "repository map is added" in result.output
+    assert " 1. (repository map)" in result.output and "[map]" in result.output
+
+
+def test_search_adds_no_map_to_an_ordinary_question(indexed_repo):
+    result = runner.invoke(app, ["search", str(indexed_repo), "shopping cart total price"])
+    assert "repository map" not in result.output
+
+
+def test_indexing_a_folder_with_nothing_to_search_says_so_and_fails(fake_provider, tmp_path):
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "empty" / "photo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+    result = runner.invoke(app, ["index", str(tmp_path / "empty")])
+    assert result.exit_code == 1 and "Nothing to search" in result.output and "right folder" in result.output
+
+
 def test_search_reports_no_results_for_a_keyword_query_with_no_matches(indexed_repo):
     result = runner.invoke(app, ["search", str(indexed_repo), "zzzqqq", "--mode", "keyword"])
     assert result.exit_code == 0 and "No results" in result.output

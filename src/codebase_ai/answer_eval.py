@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from statistics import fmean
 from typing import Literal
 
@@ -29,7 +29,8 @@ from codebase_ai.evaluation import EvalQuestion, symbol_in_sources
 from codebase_ai.llm.base import LLMProvider, Message, ProviderError, complete
 from codebase_ai.rag.answerer import Answer, Answerer
 from codebase_ai.rag.context import code_fence, source_header
-from codebase_ai.retrieval.retriever import Source
+from codebase_ai.rag.prompts import CITATION_REMINDER, SYSTEM_PROMPT
+from codebase_ai.retrieval.retriever import RetrievalError, RetrievalResult, Source
 
 Verdict = Literal["supported", "partially_supported", "unsupported"]
 VERDICT_SCORES: dict[str, float] = {"supported": 1.0, "partially_supported": 0.5, "unsupported": 0.0}
@@ -138,6 +139,8 @@ class AnswerResult:
     truncated: bool = False
     no_context: bool = False
     cited: tuple[int, ...] = ()
+    # (number, path:start-end, code) of every cited source, so a person can check the answer without the run's context
+    cited_code: tuple[tuple[int, str, str], ...] = ()
     tokens_in: int | None = None
     tokens_out: int | None = None
     seconds: float = 0.0
@@ -166,6 +169,7 @@ def score_answer(question: EvalQuestion, answer: Answer, judgement: Judgement | 
         truncated=answer.truncated,
         no_context=answer.no_context,
         cited=answer.citations.cited,
+        cited_code=tuple((number, source.location, source.text) for number, source in cited),
         tokens_in=usage.input_tokens if usage else None,
         tokens_out=usage.output_tokens if usage else None,
         seconds=answer.retrieval_seconds + answer.generation_seconds,
@@ -255,14 +259,17 @@ def sample_for_review(results: Sequence[AnswerResult], size: int, seed: int = 0)
 def export_sample(sample: Sequence[AnswerResult]) -> str:
     """Markdown for a hand check. The judge's verdict is left out on purpose so it cannot sway the reader."""
     instructions = (
-        "For each answer, read the cited code (in the results file or the repository) and decide whether the answer is "
-        "supported by it: `supported`, `partially_supported` or `unsupported`. Save your verdicts as JSON, "
-        '`{"<id>": "<verdict>", ...}`, and compare with the judge using `agreement`.'
+        "For each answer, read the cited code below it and decide whether the answer is supported by that code: "
+        "`supported`, `partially_supported` or `unsupported`. Save your verdicts as JSON, "
+        '`{"<id>": "<verdict>", ...}`, and compare with the judge using `--check-sample`.'
     )
     lines = ["# Hand check of the faithfulness judge", "", instructions, ""]
     for result in sample:
         cited = ", ".join(f"[{n}]" for n in result.cited) or "none"
         lines += [f"## {result.id}", "", f"**Question:** {result.question}", "", f"**Cited:** {cited}", "", result.answer, ""]
+        for number, location, code in result.cited_code:
+            fence = code_fence(code)
+            lines += [f"**[{number}] {location}**", "", fence, code, fence, ""]
     return "\n".join(lines)
 
 
@@ -290,3 +297,99 @@ def agreement(results: Sequence[AnswerResult], human: dict[str, str]) -> Agreeme
         matching += verdict == person
         close += abs(order.index(verdict) - order.index(person)) <= 1
     return Agreement(compared, matching, close)
+
+
+# --- frozen retrieval: every model and prompt is shown exactly the same code ----------------------------------------
+
+
+def freeze_retrieval(retriever, questions: Sequence[EvalQuestion], meta: dict, *, oracle: bool = False) -> dict:
+    """Retrieve once for every question and return it in a JSON-safe form that ``FrozenRetriever`` replays.
+
+    Comparing models or prompts is only fair if each sees the same sources; storing them also records what was shown.
+    With ``oracle`` (a plain ``Retriever``, no repository map), each question's search is limited to its gold files:
+    the same ranking and budget, but only code that holds the answer. It is defined only for questions with gold files.
+    """
+    stored = {}
+    unindexed = []
+    for question in questions:
+        if oracle and not question.gold_files:
+            continue
+        result = retriever.retrieve(question.question, only_paths=question.gold_files) if oracle else retriever.retrieve(question.question)
+        if oracle and not result.sources:
+            unindexed.append(question.id)
+        stored[question.question] = {
+            "id": question.id,
+            "overview": result.overview,
+            "sources": [asdict(source) for source in result.sources],
+        }
+    if unindexed:  # a labelling error: an empty oracle would be scored as if the model had been given the answer
+        raise RetrievalError(f"No code from the gold files of {', '.join(unindexed)} is in the index; check their gold_files.")
+    return {"meta": {**meta, "mode": retriever.mode, "oracle": oracle}, "questions": stored}
+
+
+class FrozenRetriever:
+    """Same interface as ``Retriever.retrieve``, but replays stored results; no index or embedding model is consulted."""
+
+    def __init__(self, payload: dict) -> None:
+        self.mode = payload["meta"]["mode"]
+        self.questions = payload["questions"]
+
+    def retrieve(self, query: str) -> RetrievalResult:
+        stored = self.questions.get(query)
+        if stored is None:
+            raise RetrievalError(f"This question has no frozen retrieval: {query!r}")
+        sources = [
+            Source(**{**s, "symbols": tuple(s["symbols"]), "kinds": tuple(s["kinds"]), "chunk_ids": tuple(s["chunk_ids"])})
+            for s in stored["sources"]
+        ]
+        return RetrievalResult(query=query, mode=self.mode, sources=sources, overview=stored["overview"])
+
+
+# --- the study's prompt conditions (research/STEP2_PROTOCOL_DRAFT.md section 4) ---------------------------------------
+
+PROMPTS = ("P0", "P1", "P2", "P3", "P4")
+
+# P2's example; the code and names in it are invented, so it cannot leak into an answer about a real repository.
+WORKED_EXAMPLE = """\
+Example of the expected style.
+
+Sources:
+[1] shop/cart.py:10-18 - function cart_total
+[2] shop/tax.py:3-9 - function add_tax
+
+Question: How is the total price of a cart worked out?
+
+Answer: The total adds up each line's price multiplied by its quantity [1], and then adds tax with `add_tax` [1][2]. \
+The tax rate itself is not shown in these sources, so I cannot say what it is."""
+
+_SOURCE_ORDER = {"P3": ("first 3", lambda sources: sources[:3]), "P4": ("reversed", lambda sources: sources[::-1])}
+
+
+class ReshapedRetriever:
+    """The same retrieval with the source list changed (P3: only the first three; P4: reversed, best source last).
+
+    Citations are numbered by position in the changed list, so they are checked against what the model was shown.
+    """
+
+    def __init__(self, inner, reshape: Callable[[list[Source]], list[Source]]) -> None:
+        self.inner, self.reshape, self.mode = inner, reshape, inner.mode
+
+    def retrieve(self, query: str) -> RetrievalResult:
+        result = self.inner.retrieve(query)
+        return replace(result, sources=self.reshape(result.sources))
+
+
+def apply_prompt(answerer: Answerer, name: str) -> dict:
+    """Set ``answerer`` up for one prompt condition and return exactly what it will use, for the run's record.
+
+    P0 is the system prompt alone; P1 adds the citation reminder after the question (the tool's normal prompt); P2 is P1
+    with a worked example appended to the system prompt; P3 and P4 are P1 with fewer or reversed sources.
+    """
+    if name not in PROMPTS:
+        raise ValueError(f"unknown prompt {name!r}; expected one of {', '.join(PROMPTS)}")
+    answerer.system = f"{SYSTEM_PROMPT}\n\n{WORKED_EXAMPLE}" if name == "P2" else SYSTEM_PROMPT
+    answerer.reminder = None if name == "P0" else CITATION_REMINDER
+    order, reshape = _SOURCE_ORDER.get(name, ("as retrieved", None))
+    if reshape is not None:
+        answerer.retriever = ReshapedRetriever(answerer.retriever, reshape)
+    return {"name": name, "system": answerer.system, "reminder": answerer.reminder, "sources": order}

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -232,13 +233,15 @@ class Retriever:
 
     # -- ranking ----------------------------------------------------------------------------------------
 
-    def rank(self, query: str) -> list[ScoredChunk]:
-        """Chunks best-first for ``query`` using the configured mode."""
+    def rank(self, query: str, only_paths: Sequence[str] | None = None) -> list[ScoredChunk]:
+        """Chunks best-first for ``query`` using the configured mode; ``only_paths`` ranks just those files' chunks."""
+        if only_paths is not None and self.mode != "vector":
+            raise ValueError("only_paths needs vector mode (the keyword index cannot be limited to some files)")
         vector_hits: list[SearchHit] = []
         keyword_hits: list[SearchHit] = []
         if self.mode != "keyword":
             assert self.embedder is not None
-            vector_hits = self.index.vectors.query(self.embedder.embed_query(query), self.top_k)
+            vector_hits = self.index.vectors.query(self.embedder.embed_query(query), self.top_k, only_paths)
         if self.mode != "vector":
             keyword_hits = self.index.keyword.search(query, self.top_k)
 
@@ -383,9 +386,12 @@ class Retriever:
 
     # -- public -----------------------------------------------------------------------------------------
 
-    def retrieve(self, query: str) -> RetrievalResult:
-        """Rank, select under the budget, add class context, and merge into sources."""
-        ranked = self.rank(query)
+    def retrieve(self, query: str, only_paths: Sequence[str] | None = None) -> RetrievalResult:
+        """Rank, select under the budget, add class context, and merge into sources.
+
+        ``only_paths`` keeps the whole procedure but searches just those files (the study's oracle context).
+        """
+        ranked = self.rank(query, only_paths)
         selected = self._select(ranked)
         context_ids: set[str] = set()
         if self.add_context:

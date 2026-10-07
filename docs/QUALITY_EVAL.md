@@ -8,9 +8,11 @@ pay off and one earlier figure that turned out to be too optimistic.
 |---|---|---|
 | Does a repository map help questions about the whole project? | **Yes, when it is triggered.** On 11 labelled overview questions the areas shown to the model rose from 63% to 93%. **Recognising such questions is the weak point:** on fresh phrasings written before the patterns were widened, only 2 of 20 were recognised; the widened patterns get 18 of 20, but that number is not independent evidence. | Section 1 |
 | Does a cross-encoder reranker improve retrieval? | **No.** The one model tested made retrieval slightly worse and roughly 2 s slower per query. It stays off. | Section 2 |
-| Are answers grounded, correctly cited and faithful? | **Not measured yet.** The harness is built and tested; it needs a real model and your key. | Section 3 |
+| Are answers grounded, correctly cited and correct? | **Measured with a local 7B model (30 questions, offline).** Citations are never invented (validity 100%, no made-up locations); with the citation reminder every answer cites its sources (40% to 100% on held-out questions); hand-graded, 14 of 20 answers are correct, 4 partly, 2 wrong. The 4B judge called everything "supported", so no faithfulness number is quoted. | Section 3 |
 | Does demoting release notes (CHANGELOG, HISTORY) help? | **No measurable effect:** of 109 questions, 108 tied and one moved by a single rank. Available as `CHANGELOG_PENALTY`, off. | Section 4 |
 | Does it scale to big repositories? | **Everything except the embedding model grows linearly** up to 4,000 files (28,000 chunks): 63 s to index, 10 ms to search. The real embedding model dominates, at roughly an hour for 4,000 files on a CPU (extrapolated). | Section 5 |
+| Does retrieval hold up on code it was never evaluated on? | **Yes.** 36 questions written blind on `httpx` and `jinja2`: MRR 0.915 and 0.801, the right file in the model's context for every question. | Section 6 |
+| Does demoting near-empty chunks (one-line class headers) help? | **No measurable effect:** 140 of 145 questions tied. Not built. | Section 7 |
 
 Follow-up handling (rewriting "and what about retries?" into a standalone question) has no table here: it needs a
 model to run, so it is covered by tests with a scripted model only. Its risk is a bad rewrite, which is why the
@@ -169,7 +171,83 @@ Latency cost per query (mean, this machine, CPU): (cross-encoder/ms-marco-MiniLM
   which leaves a reranker little room; a repository where the right file is often ranked 10th to 30th might behave
   differently. The `codebase_ai` suite indexes this repository as it is now, so it is re-run with every report.
 
-## 3. Answer quality: built, not yet run
+## 3. Answer quality, measured with a local model (2026-10-06)
+
+**What was run.** The first real answers this system ever produced: 30 labelled questions answered fully offline by
+`qwen2.5-coder:7b` through Ollama 0.35.1 (the configured local default; about 41% on a 4 GB GTX 1650, the rest on the
+CPU), graded by `gemma3:4b`, a model from a different family. Nothing left the machine. Questions: the first 10 of
+`magnaflow` (a JavaScript application), the first 10 of the blind `httpx` set, and the first 10 of the blind `jinja2` set
+twice, once without and once with the citation reminder described below. About 2 minutes per answer.
+
+**First run: 20 questions, the original prompt.**
+
+| Measure | `magnaflow` (10) | `httpx` (10) | All 20 |
+|---|---|---|---|
+| Answered without error | 10 | 10 | 20 |
+| Grounded: cites at least one supplied source | 60% | 70% | **65%** |
+| Citation validity: cited numbers that exist | 100% | 100% | **100%** |
+| Citation precision: cited sources that are relevant | 58% | 67% | 63% |
+| Cites a gold or acceptable file | 30% | 60% | 45% |
+| Mentions a location it was not shown | 0% | 0% | **0%** |
+| Refused / cut off | 0% / 0% | 0% / 0% | 0% / 0% |
+| Tokens in / out per answer | 4,871 / 138 | 4,518 / 281 | 4,694 / 209 |
+
+**Correctness, graded by hand against the code** (by the AI assistant that built the system, not by an independent
+person; a strict reading of whether the answer is right, not only whether it matches what it cites):
+
+| Grade | Answers | Notes |
+|---|---|---|
+| Correct | 14 of 20 | including the `MockTransport` question, whose file retrieval had ranked below 5th; it was still in the context, and the model found it and cited the exact lines |
+| Partly correct | 4 | forgets one of six roles; misses the actual `seatsUsed <= seatLimit` check; places decompression imprecisely; claims query-parameter merging combines values (the code it quotes keeps only the new one) |
+| Wrong | 2 | explains where @mentions are highlighted, not where they are matched to a person; says reminders are sent by `functions/index.js`, which is dead Cloud Functions code (MagnaFlow sends them from a GitHub Actions job) |
+
+**What it found.**
+
+- **A third of the answers cited nothing.** The content of most was right, but the 7B model named files in prose
+  ("`src/lib/criticalPath.js`") instead of writing `[n]`. Citation validity was perfect and no answer invented a location,
+  so the problem was missing citations, not false ones.
+- **Faithful is not the same as correct.** Both wrong answers are faithful to the code they cite: retrieval supplied
+  plausible but wrong code (a highlighting function; an undeployed Cloud Function), and the model described it
+  accurately. The checks in this project, and the judge, measure faithfulness. Nothing here can know that code is dead.
+- **The 4B judge is uninformative.** It called every one of the 33 answers it judged `supported`, including ones that
+  claim more than their cited excerpts show. A faithfulness score from it would read 100%, so none is quoted. A stronger
+  judge, or the hand check below, is needed for that number.
+
+**The fix it led to: a citation reminder.** Small models follow what is nearest the end of the prompt, so one line was
+added after the question: *"Answer only from the sources above, and cite every statement about the code with its number,
+like [1]."* (`rag/prompts.py`). To test it without tuning on the questions that revealed the problem, the first 10 blind
+`jinja2` questions were answered with the old prompt and then with the new one:
+
+| `jinja2`, same 10 questions | Without the reminder | With it | Paired |
+|---|---|---|---|
+| Grounded | 40% | **100%** | better on 6, worse on 0 (sign test p = 0.03) |
+| Cites a gold file | 30% | **100%** | better on 7, worse on 0 (p = 0.02) |
+| Citation precision | 56% | 79% | |
+| Correct / partly correct / wrong (hand graded) | 8 / 2 / 0 | 7 / 3 / 0 | one answer each way; no measurable change |
+| Tokens out, seconds per answer | 239, 112 s | 219, 112 s | |
+
+**Decision: the reminder is on.** It fixed missing citations without measurably changing correctness or cost. **What
+this does not show:** ten questions are few (the p-values say the direction is unlikely to be chance, not how large the
+effect is); the reminder was not re-run on the first 20 questions; Claude and OpenAI were still not run, and a hosted
+model may already cite reliably without it.
+
+**The hand check is still open.** `eval/results/answers_magnaflow_sample.md` and `answers_httpx_sample.md` hold 10 judged
+answers, each with the code it cites, and without the judge's verdicts. Grading them and running `--check-sample`
+(below) measures how far the judge can be trusted; until then the faithfulness column stays empty.
+
+**How it was run** (both models local, so nothing is sent anywhere and no `--yes` is needed):
+
+```bash
+ollama pull qwen2.5-coder:7b && ollama pull gemma3:4b
+LLM_TIMEOUT_SECONDS=600 python eval/run_answers.py path/to/repo eval/questions/httpx.jsonl \
+    --provider ollama --model qwen2.5-coder:7b --judge-provider ollama --judge-model gemma3:4b \
+    --limit 10 --export-sample 5
+```
+
+`LLM_TIMEOUT_SECONDS=600` matters on a laptop: the first word of an answer only arrives after the whole prompt has been
+read, which took over a minute on this hardware, and the default 120 s leaves little margin.
+
+### What the harness measures
 
 **What was built** (`src/codebase_ai/answer_eval.py`, `eval/run_answers.py`). It answers the labelled questions with a
 real model and scores the answers:
@@ -185,13 +263,12 @@ real model and scores the answers:
   with the claims it could not back. An answer with no citations is not judged (there is nothing to check it against);
   the grounded rate already counts it.
 
-**Why there are no results here.** It needs a language model and, for faithfulness, a second one. No API keys were
-used in development and no local model is installed, so this was tested only with scripted models: the scoring, the
-judge prompt and reply parsing, error handling (a rejected key stops the run, a transient failure is recorded and the
-run continues), and the script itself, including its refusal to start without `--yes` when code would be sent to a
-hosted provider.
+The scoring, the judge prompt and reply parsing, error handling (a rejected key stops the run, a transient failure is
+recorded and the run continues) and the script itself, including its refusal to start without `--yes` when code would
+be sent to a hosted provider, are also covered by tests with scripted models. Each result keeps the code it cites, so
+the hand-check file can be graded on its own.
 
-**How to run it.**
+**How to run it with a hosted model.**
 
 ```bash
 python eval/run_answers.py path/to/repo eval/questions/magnaflow.jsonl \
@@ -358,6 +435,55 @@ for real (786 chunks in 100 seconds, about 7.8 chunks per second on this laptop 
 - **What this does not show.** The code is synthetic: no giant files, deep nesting or unusual structures. The embedding time
   is an extrapolation, not a measurement. Nothing was run on a repository of tens of thousands of files, and memory use
   was not measured.
+
+## 6. Code it was never evaluated on (2026-10-06)
+
+**Why.** Every earlier number comes from repositories the system was tuned on, or labelled by the person who built it
+after reading them. To see whether the results carry over, 36 questions were written for two libraries that had never
+been indexed or evaluated, `httpx` 0.28.1 and `jinja2` 3.1.6, **before** indexing them, with the labels checked against
+the code first (`eval/questions/httpx.jsonl`, `eval/questions/jinja2.jsonl`; paths relative to the installed package
+folder). Questions avoid the code's own names where possible ("return canned responses without real network
+requests" for `MockTransport`).
+
+| Repository | Files / chunks | Config | Hit@1 | Hit@3 | Hit@5 | MRR | Gold symbol in context |
+|---|---|---|---|---|---|---|---|
+| `httpx` | 23 / 433 | **vector** (default) | 89% | 94% | 94% | **0.915** | 100% |
+| | | keyword | 72% | 94% | 94% | 0.824 | 94% |
+| | | hybrid | 78% | 94% | 94% | 0.861 | 100% |
+| `jinja2` | 25 / 696 | **vector** (default) | 67% | 94% | 100% | **0.801** | 83% |
+| | | keyword | 61% | 78% | 94% | 0.721 | 72% |
+| | | hybrid | 67% | 89% | 100% | 0.806 | 72% |
+
+**Reading it.** The earlier findings replicate on unseen code: vector search beats keyword, and hybrid adds nothing
+measurable. A gold file was in the context sent to the model for all 36 questions. The weak spot is the first
+position: on `jinja2` the right file ranks first for two questions in three. The one question with no gold file in the
+top 5 asked for "canned responses without real network requests"; meaning-based search did not connect "canned" with
+`MockTransport`. **Caveats:** two small, well-named Python libraries are an easy case, and the questions were written by
+the same AI assistant that built the system, though not tuned on.
+
+Repeat with `codebase-ai index .venv/Lib/site-packages/httpx` and
+`codebase-ai eval .venv/Lib/site-packages/httpx -q eval/questions/httpx.jsonl` (the same for `jinja2`).
+
+## 7. Near-empty chunks (2026-10-06)
+
+**Why this was tried.** For a vague question, chunks with almost no content can rank high: a large class without a
+docstring becomes a one-line class chunk (`class Response:`), and a type alias between definitions a two-line module
+chunk. Their embedding is dominated by the `path • symbol • kind` header, so it matches vague queries easily.
+
+**How it was measured.** The default retrieval against the same retrieval with chunks of at most one or two non-blank
+lines demoted (score x0.8 or x0.6), on all 145 labelled questions of six repositories (`magnaflow`, `codebase_ai`,
+`rich`, `requests`, `httpx`, `jinja2`) and their 110 identifier lookups, compared question by question.
+
+| Demotion | Questions: MRR difference | 95% interval | Better / worse / tied | Lookups: MRR difference |
+|---|---|---|---|---|
+| at most 1 line, x0.8 | +0.000 | [+0.000, +0.000] | 1 / 0 / 144 | -0.002 |
+| at most 2 lines, x0.8 | -0.003 | [-0.013, +0.004] | 4 / 1 / 140 | +0.003 |
+| at most 2 lines, x0.6 | -0.003 | [-0.013, +0.004] | 4 / 1 / 140 | -0.006 |
+
+**Decision: not built.** It changes almost nothing, because a near-empty chunk rarely pushes the right *file* down:
+it takes one of the context slots, not the file's place in the ranking. It stays a cosmetic problem of vague,
+whole-project questions, where the repository map carries the answer anyway. (Measured with a one-off script around
+`Retriever.rank`; the method is the paired comparison used everywhere else.)
 
 ## Decisions recorded here
 

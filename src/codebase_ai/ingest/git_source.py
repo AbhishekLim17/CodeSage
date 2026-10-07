@@ -154,6 +154,12 @@ def _git(
         raise GitSourceError(f"git took longer than {int(timeout)} seconds and was stopped.") from exc
 
 
+def check_branch(branch: str | None) -> None:
+    """Refuse a branch name that could be read as an option or is not one at all; ``None`` means the default."""
+    if branch is not None and not _BRANCH.match(branch):
+        raise GitSourceError("That is not a valid branch name.")
+
+
 def sync_repo(
     remote: RemoteRepo,
     root: Path,
@@ -168,8 +174,7 @@ def sync_repo(
     ``root`` is the index directory, so clones sit beside the indexes. ``protocols`` and ``runner`` exist so the
     tests can use a local repository and a fake git; the CLI and UI never change them.
     """
-    if branch is not None and not _BRANCH.match(branch):
-        raise GitSourceError("That is not a valid branch name.")
+    check_branch(branch)
     target = clone_dir_for(remote, root)
     scratch = Path(root) / "clones"
     scratch.mkdir(parents=True, exist_ok=True)

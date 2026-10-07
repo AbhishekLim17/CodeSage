@@ -15,6 +15,16 @@ where you can; a model grading its own answers is lenient. To check the judge it
 without looking at the judge's verdicts, and compare:
 
     python eval/run_answers.py --check-sample my_verdicts.json --results eval/results/answer_eval.json
+
+Long runs: every result is also written to ``<out-json>.partial.jsonl`` as soon as it is scored, so after a crash or
+Ctrl+C ``--resume`` carries on where the run stopped (failed answers are retried). To compare models or prompts
+fairly, store the retrieved sources once and replay them in every run, so all of them see exactly the same code:
+
+    python eval/run_answers.py REPO QUESTIONS --provider ollama --freeze-retrieval frozen.json
+    python eval/run_answers.py REPO QUESTIONS --provider ollama --model qwen2.5-coder:7b --frozen frozen.json
+
+``--prompt P0`` to ``P4`` picks one of the study's prompt conditions (``answer_eval.apply_prompt``); the default, P1, is
+the tool's own prompt. The exact prompt is stored with the results.
 """
 
 from __future__ import annotations
@@ -28,11 +38,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from codebase_ai.answer_eval import (
+    PROMPTS,
     AnswerReport,
     AnswerResult,
+    FrozenRetriever,
     Judgement,
     agreement,
+    apply_prompt,
     export_sample,
+    freeze_retrieval,
     run_answer_eval,
     sample_for_review,
 )
@@ -41,7 +55,7 @@ from codebase_ai.evaluation import EvalQuestion, load_questions
 from codebase_ai.index.embedder import EmbeddingError, create_embedder
 from codebase_ai.index.indexer import RepoIndex
 from codebase_ai.llm.base import LLMProvider, ProviderError, create_provider
-from codebase_ai.rag.answerer import context_budget_for, create_answerer
+from codebase_ai.rag.answerer import context_budget_for, create_answerer, create_retriever
 from codebase_ai.retrieval.retriever import RetrievalError
 
 DEFAULT_OUT = Path(__file__).parent / "results" / "answer_eval.json"
@@ -55,6 +69,7 @@ def plan_text(
     questions: list[EvalQuestion], generator: LLMProvider, judge: LLMProvider | None, budget: int, max_tokens: int
 ) -> str:
     """What the run will do, in plain words, before anything is sent."""
+    max_tokens = min(max_tokens, generator.max_output_tokens or max_tokens)  # Ollama caps output itself
     first = (
         f"{len(questions)} question(s). For each: one answer from {generator.name} ({generator.model}), "
         f"with up to about {budget} tokens of retrieved code in the prompt and up to {max_tokens} tokens of output."
@@ -112,15 +127,16 @@ def results_payload(report: AnswerReport, env: dict) -> dict:
     return {"env": env, "summary": report.summary, "results": [asdict(r) for r in report.results]}
 
 
+def result_from_row(row: dict) -> AnswerResult:
+    """An ``AnswerResult`` back from its JSON form (lists become tuples again)."""
+    judgement = Judgement(**{**row["judgement"], "unsupported_claims": tuple(row["judgement"]["unsupported_claims"])})
+    cited_code = tuple(tuple(c) for c in row.get("cited_code", ()))
+    return AnswerResult(**{**row, "cited": tuple(row["cited"]), "cited_code": cited_code, "judgement": judgement})
+
+
 def load_results(path: Path) -> list[AnswerResult]:
     """Read back the results file written by a run (used to check the judge against a human)."""
-    rows = json.loads(path.read_text(encoding="utf-8"))["results"]
-    return [
-        AnswerResult(
-            **{**row, "cited": tuple(row["cited"]), "judgement": Judgement(**{**row["judgement"], "unsupported_claims": tuple(row["judgement"]["unsupported_claims"])})}
-        )
-        for row in rows
-    ]
+    return [result_from_row(row) for row in json.loads(path.read_text(encoding="utf-8"))["results"]]
 
 
 def check_sample(human_file: Path, results_file: Path) -> str:
@@ -152,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-md", type=Path, default=None)
     parser.add_argument("--check-sample", type=Path, default=None, metavar="HUMAN_JSON")
     parser.add_argument("--results", type=Path, default=DEFAULT_OUT, help="results file for --check-sample")
+    parser.add_argument("--resume", action="store_true", help="keep the answers already in the checkpoint; retry failures")
+    parser.add_argument("--freeze-retrieval", type=Path, default=None, metavar="FILE", help="store the retrieved sources and stop; no model is called")
+    parser.add_argument("--frozen", type=Path, default=None, metavar="FILE", help="answer from sources stored by --freeze-retrieval")
+    parser.add_argument("--prompt", default="P1", choices=PROMPTS, help="the study's prompt condition (default P1, the tool's own prompt)")
+    parser.add_argument("--oracle", action="store_true", help="with --freeze-retrieval: store only code from each question's gold files")
+    parser.add_argument("--fresh-model", action="store_true", help="Ollama: reload the model for every answer, so a re-run repeats exactly")
     return parser
 
 
@@ -174,6 +196,21 @@ def main(argv: list[str] | None = None) -> int:
     if not questions:
         print("error: no questions selected", file=sys.stderr)
         return 2
+    freezing = args.freeze_retrieval is not None
+    if args.oracle and not freezing:
+        print("error: --oracle goes with --freeze-retrieval; answer from the oracle file with --frozen", file=sys.stderr)
+        return 2
+    frozen = json.loads(args.frozen.read_text(encoding="utf-8")) if args.frozen else None
+    if frozen is not None:
+        if frozen["meta"].get("oracle"):  # the oracle holds only the questions it is defined for
+            skipped = [q.id for q in questions if q.question not in frozen["questions"]]
+            questions = [q for q in questions if q.question in frozen["questions"]]
+            if skipped:
+                print(f"Oracle: {len(skipped)} question(s) have no gold files and are left out: {', '.join(skipped)}")
+        missing = [q.id for q in questions if q.question not in frozen["questions"]]
+        if missing:
+            print(f"error: {len(missing)} question(s) have no frozen retrieval in {args.frozen}, e.g. {', '.join(missing[:3])}", file=sys.stderr)
+            return 2
 
     try:
         generator = create_provider(settings, provider=args.provider, model=args.model)
@@ -185,12 +222,46 @@ def main(argv: list[str] | None = None) -> int:
     except ProviderError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    if args.fresh_model:  # research/DETERMINISM_CHECK.md: only an answer from a freshly loaded model repeats exactly
+        for provider in (generator, judge):
+            if provider is not None and hasattr(provider, "keep_alive"):
+                provider.keep_alive = 0
+
+    # A checkpoint gets every result the moment it is scored, so a crash or Ctrl+C loses at most one answer. Its first
+    # line says which run it belongs to: resuming with another model, judge or question set would silently mix runs.
+    checkpoint = args.out_json.with_suffix(".partial.jsonl")
+    run_header = {
+        "provider": generator.name,
+        "model": generator.model,
+        "judge": f"{judge.name}/{judge.model}" if judge else "none",
+        "questions_file": str(args.questions),
+        "frozen": str(args.frozen) if args.frozen else None,
+        "prompt": args.prompt,
+        "fresh_model": args.fresh_model,
+    }
+    done: dict[str, AnswerResult] = {}
+    if args.resume and checkpoint.exists() and not freezing:
+        lines = checkpoint.read_text(encoding="utf-8").splitlines()
+        if not lines or json.loads(lines[0]).get("_run") != run_header:
+            print(f"error: {checkpoint} belongs to a different run (model, judge, questions, frozen file, prompt or --fresh-model); not resuming", file=sys.stderr)
+            return 2
+        done = {r.id: r for r in (result_from_row(json.loads(line)) for line in lines[1:]) if r.error is None}
+    todo = [q for q in questions if q.id not in done]
 
     budget = context_budget_for(generator, settings.context_token_budget, settings.answer_max_tokens)
-    print(plan_text(questions, generator, judge, budget, settings.answer_max_tokens))
-    if any(p.sends_code_off_machine for p in (generator, judge) if p is not None) and not args.yes:
-        print("\nNot started: re-run with --yes to send code to the provider(s) above.", file=sys.stderr)
-        return 2
+    if freezing:
+        print(f"Freezing retrieval for {len(questions)} question(s), with up to about {budget} tokens of code each. No model is called.")
+    else:
+        if done:
+            print(f"Resuming: {len(done)} answered already, {len(todo)} to go.")
+        print(plan_text(todo, generator, judge, budget, settings.answer_max_tokens))
+        if frozen is not None:
+            kind = "oracle: only each question's gold files" if frozen["meta"].get("oracle") else "frozen"
+            print(f"Sources: replayed from {args.frozen} ({kind}, with up to {frozen['meta']['budget_tokens']} tokens of code).")
+        print(f"Prompt: {args.prompt}" + ("; the model is reloaded for every answer" if args.fresh_model else ""))
+        if any(p.sends_code_off_machine for p in (generator, judge) if p is not None) and not args.yes:
+            print("\nNot started: re-run with --yes to send code to the provider(s) above.", file=sys.stderr)
+            return 2
 
     repo = args.repo.resolve()
     index = RepoIndex(repo, args.index_root or settings.index_dir)
@@ -202,18 +273,42 @@ def main(argv: list[str] | None = None) -> int:
         try:
             embedder = None if mode == "keyword" else create_embedder(settings)
             answerer = create_answerer(settings, index, embedder, generator, mode=mode)
-            report = run_answer_eval(
-                answerer,
-                questions,
-                judge=judge,
-                name=f"{generator.name}/{generator.model}",
-                progress=lambda n, total, r: print(
-                    f"  [{n}/{total}] {r.id}: " + (f"failed: {r.error}" if r.error else f"grounded={r.grounded} verdict={r.judgement.verdict}"),
-                    flush=True,
-                ),
-            )
+            if freezing:
+                meta = {
+                    "repo": str(repo),
+                    "embedding_model": embedder.model_id if embedder else None,
+                    "budget_tokens": budget,
+                    "questions_file": str(args.questions),
+                    "created": datetime.now(tz=UTC).isoformat(timespec="seconds"),
+                }
+                # The oracle searches each question's gold files with the plain retriever: no repository map.
+                retriever = create_retriever(settings, index, embedder, mode=mode, budget_tokens=budget, overview=False) if args.oracle else answerer.retriever
+                payload = freeze_retrieval(retriever, questions, meta, oracle=args.oracle)
+                args.freeze_retrieval.parent.mkdir(parents=True, exist_ok=True)
+                args.freeze_retrieval.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+                print(f"wrote {args.freeze_retrieval}")
+                return 0
+            if frozen is not None:
+                answerer.retriever = FrozenRetriever(frozen)
+            prompt = apply_prompt(answerer, args.prompt)  # after freezing: the stored sources are always the full list
+
+            args.out_json.parent.mkdir(parents=True, exist_ok=True)
+            kept = [{"_run": run_header}, *(asdict(r) for r in done.values())]
+            checkpoint.write_text("".join(json.dumps(row) + "\n" for row in kept), encoding="utf-8")
+
+            def record(n: int, total: int, r: AnswerResult) -> None:
+                with checkpoint.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(asdict(r)) + "\n")
+                status = f"failed: {r.error}" if r.error else f"grounded={r.grounded} verdict={r.judgement.verdict}"
+                print(f"  [{n}/{total}] {r.id}: {status}", flush=True)
+
+            new = run_answer_eval(answerer, todo, judge=judge, name=f"{generator.name}/{generator.model}", progress=record)
+            by_id = {**done, **{r.id: r for r in new.results}}
+            report = AnswerReport(new.name, [by_id[q.id] for q in questions])
         except (ProviderError, EmbeddingError, RetrievalError) as exc:
             print(f"error: {exc}", file=sys.stderr)
+            if checkpoint.exists() and not freezing:
+                print(f"Answers so far are kept in {checkpoint}; re-run with --resume to continue.", file=sys.stderr)
             return 1
     finally:
         index.close()
@@ -226,6 +321,9 @@ def main(argv: list[str] | None = None) -> int:
         "judge": f"{judge.name}/{judge.model}" if judge else "none",
         "embedding_model": embedder.model_id if embedder else "none (keyword)",
         "questions_file": str(args.questions),
+        "retrieval": f"frozen: {args.frozen}" if frozen is not None else "live",
+        "prompt": prompt,  # the exact system prompt, reminder and source order the model was given
+        "fresh_model": args.fresh_model,
     }
     text = render(report, env)
     print("\n" + text)

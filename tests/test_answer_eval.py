@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
 
 from codebase_ai.answer_eval import (
     JUDGE_SYSTEM,
+    PROMPTS,
+    WORKED_EXAMPLE,
     AnswerReport,
     AnswerResult,
     Judgement,
     agreement,
+    apply_prompt,
     build_judge_message,
     export_sample,
+    freeze_retrieval,
     judge_faithfulness,
     parse_judgement,
     run_answer_eval,
@@ -23,8 +28,9 @@ from codebase_ai.evaluation import EvalQuestion
 from codebase_ai.index.indexer import Indexer, RepoIndex
 from codebase_ai.llm.base import ProviderError
 from codebase_ai.rag.answerer import Answerer
+from codebase_ai.rag.prompts import CITATION_REMINDER, SYSTEM_PROMPT
 from codebase_ai.retrieval.overview import OverviewRetriever
-from codebase_ai.retrieval.retriever import Retriever
+from codebase_ai.retrieval.retriever import RetrievalError, Retriever
 from helpers import ScriptedProvider
 
 QUESTION = EvalQuestion(
@@ -296,6 +302,19 @@ class TestHandCheck:
             assert f"verdict: {verdict}" not in text
         assert "Judge" not in text.split("\n\n", 2)[2]  # the body never mentions the judge
 
+    def test_the_export_shows_the_cited_code_so_it_can_be_checked_on_its_own(self):
+        # Found by doing the hand check: "[14]" means nothing without the run's context, which the reader never sees.
+        code = "def f():\n    return '```'"
+        result = AnswerResult("e", "explain", "qe", answer="It returns a fence [3].", cited=(3,), cited_code=((3, "a.py:1-2", code),))
+        text = export_sample([result])
+        assert "**[3] a.py:1-2**" in text and code in text
+        assert "````\n" + code + "\n````" in text  # a fence longer than the backticks inside the code
+
+    def test_scoring_keeps_the_cited_code(self, built, fake_embedder):
+        result = score_answer(QUESTION, answerer(built, fake_embedder).ask(QUESTION.question))
+        ((number, location, code),) = result.cited_code
+        assert number == 1 and location.startswith("web/cart.js:") and "cartTotal" in code
+
     def test_agreement_counts_exact_and_one_step_matches_for_graded_questions_only(self):
         human = {"a": "supported", "b": "partially_supported", "d": "supported", "c": "supported", "zzz": "supported"}
         result = agreement(self.RESULTS, human)
@@ -305,3 +324,55 @@ class TestHandCheck:
     def test_agreement_ignores_invalid_human_verdicts_and_empty_input(self):
         assert agreement(self.RESULTS, {"a": "yes"}).compared == 0
         assert agreement(self.RESULTS, {}).rate is None
+
+
+class TestOracle:
+    """The oracle context: the same retrieval, limited to each question's gold files (research plan, step 3.5)."""
+
+    SERVER = EvalQuestion(id="q2", question="shopping cart total price", type="explain", gold_files=("go/server.go",))
+
+    def test_only_the_gold_files_are_searched_with_the_usual_ranking_and_budget(self, built, fake_embedder):
+        retriever = Retriever(built, fake_embedder)
+        assert retriever.retrieve(self.SERVER.question).sources[0].path == "web/cart.js"  # what retrieval would show
+        payload = freeze_retrieval(retriever, [self.SERVER], {}, oracle=True)
+        stored = payload["questions"][self.SERVER.question]["sources"]
+        assert stored and {s["path"] for s in stored} == {"go/server.go"}
+        assert payload["meta"]["oracle"] is True
+
+    def test_gold_files_missing_from_the_index_are_an_error_not_an_empty_context(self, built, fake_embedder):
+        typo = EvalQuestion(id="q3", question="anything", type="explain", gold_files=("go/no_such_file.go",))
+        with pytest.raises(RetrievalError, match="q3"):
+            freeze_retrieval(Retriever(built, fake_embedder), [typo], {}, oracle=True)
+
+    def test_only_vector_search_can_be_limited_to_some_files(self, built):
+        with pytest.raises(ValueError, match="vector"):
+            Retriever(built, None, mode="keyword").retrieve("anything", only_paths=["go/server.go"])
+
+
+class TestPromptConditions:
+    """The study's prompts P0 to P4 (research/STEP2_PROTOCOL_DRAFT.md section 4)."""
+
+    def test_the_prompt_texts_are_word_for_word_the_protocols(self):
+        protocol = (Path(__file__).parent.parent / "research" / "STEP2_PROTOCOL_DRAFT.md").read_text(encoding="utf-8")
+        for text in (SYSTEM_PROMPT, CITATION_REMINDER, WORKED_EXAMPLE):
+            assert text in protocol
+
+    @pytest.mark.parametrize("name", PROMPTS)
+    def test_each_prompt_changes_only_what_it_says(self, built, fake_embedder, name):
+        a = answerer(built, fake_embedder)
+        shown = a.retriever.retrieve(QUESTION.question).sources
+        assert len(shown) > 3  # otherwise P3 would change nothing here
+        record = apply_prompt(a, name)
+        answer = a.ask(QUESTION.question)
+        call = a.provider.calls[0]
+        assert call["system"] == record["system"] and call["system"].startswith(SYSTEM_PROMPT)
+        assert (WORKED_EXAMPLE in call["system"]) == (name == "P2")
+        assert call["prompt"].endswith(CITATION_REMINDER) == (name != "P0")
+        expected = {"P3": shown[:3], "P4": shown[::-1]}.get(name, shown)
+        assert [s.location for s in answer.sources] == [s.location for s in expected]
+        # "[1]" is checked against the first source the model was shown, which for P4 is the worst-ranked one.
+        assert answer.cited_sources[0][1].location == expected[0].location
+
+    def test_an_unknown_prompt_is_refused(self, built, fake_embedder):
+        with pytest.raises(ValueError, match="P0, P1"):
+            apply_prompt(answerer(built, fake_embedder), "P9")

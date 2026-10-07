@@ -439,6 +439,14 @@ def test_ollama_always_sets_the_context_window_and_caps_the_output():
     assert (provider.context_window, provider.max_output_tokens, provider.sends_code_off_machine) == (20_000, OUTPUT_CAP, False)
 
 
+def test_ollama_keeps_its_default_model_lifetime_unless_told_to_unload_after_each_request():
+    seen = Recorder()
+    run(ollama_provider(ollama_ok(), seen))
+    assert "keep_alive" not in seen.last["body"]  # Ollama's own default: the model stays loaded for a while
+    run(ollama_provider(ollama_ok(), seen, keep_alive=0))
+    assert seen.last["body"]["keep_alive"] == 0  # unloaded after the answer, so the next one starts fresh (D11)
+
+
 def test_ollama_small_requests_are_not_inflated_and_temperature_can_be_set():
     seen = Recorder()
     run(ollama_provider(ollama_ok(), seen), max_tokens=300, temperature=0.4)
