@@ -1,0 +1,18 @@
+{"id": "j01", "type": "explain", "question": "How is template source text split into tokens?", "gold_files": ["lexer.py"], "gold_symbols": ["tokeniter"]}
+{"id": "j02", "type": "explain", "question": "How does the parser handle a for loop that has an else block?", "gold_files": ["parser.py"], "gold_symbols": ["parse_for"]}
+{"id": "j03", "type": "explain", "question": "How is a parsed template turned into Python source code?", "gold_files": ["compiler.py"], "gold_symbols": ["CodeGenerator"]}
+{"id": "j04", "type": "explain", "question": "How can autoescaping be switched on only for templates with certain file extensions like .html?", "gold_files": ["utils.py"], "gold_symbols": ["select_autoescape"]}
+{"id": "j05", "type": "explain", "question": "How are templates loaded from a folder on disk, and how does it notice that a file changed?", "gold_files": ["loaders.py"], "gold_symbols": ["FileSystemLoader"]}
+{"id": "j06", "type": "explain", "question": "How does the sandboxed environment block access to unsafe attributes and methods?", "gold_files": ["sandbox.py"], "gold_symbols": ["is_safe_attribute"]}
+{"id": "j07", "type": "locate", "question": "Where is the filter that gives a fallback value when a variable is undefined?", "gold_files": ["filters.py"], "gold_symbols": ["do_default"]}
+{"id": "j08", "type": "explain", "question": "How does template inheritance with extends and block overrides work when rendering?", "gold_files": ["runtime.py", "compiler.py"], "gold_symbols": ["BlockReference"]}
+{"id": "j09", "type": "explain", "question": "What happens when a template uses a variable that was never passed in, and how can that be made to raise an error?", "gold_files": ["runtime.py"], "gold_symbols": ["StrictUndefined"]}
+{"id": "j10", "type": "explain", "question": "How is compiled template bytecode cached on disk between program runs?", "gold_files": ["bccache.py"], "gold_symbols": ["FileSystemBytecodeCache"]}
+{"id": "j11", "type": "explain", "question": "How does the internationalisation extension add the trans block for translatable text?", "gold_files": ["ext.py"], "gold_symbols": ["InternationalizationExtension"]}
+{"id": "j12", "type": "explain", "question": "How are exception tracebacks rewritten so they point at the line in the template?", "gold_files": ["debug.py"], "gold_symbols": ["rewrite_traceback_stack"]}
+{"id": "j13", "type": "locate", "question": "Where are the built-in tests such as divisibleby and defined implemented?", "gold_files": ["tests.py"], "gold_symbols": ["test_divisibleby"]}
+{"id": "j14", "type": "explain", "question": "How are constant expressions evaluated at compile time to optimise the template?", "gold_files": ["optimizer.py"], "gold_symbols": ["Optimizer"]}
+{"id": "j15", "type": "explain", "question": "How can rendering return native Python types like lists and ints instead of a string?", "gold_files": ["nativetypes.py"], "gold_symbols": ["NativeEnvironment"]}
+{"id": "j16", "type": "explain", "question": "How does the environment cache loaded templates in memory and decide when to reload one?", "gold_files": ["environment.py"], "gold_symbols": ["_load_template"]}
+{"id": "j17", "type": "locate", "question": "How can I list every variable a template uses without rendering it?", "gold_files": ["meta.py"], "gold_symbols": ["find_undeclared_variables"]}
+{"id": "j18", "type": "explain", "question": "How are loop helper variables like loop.index and loop.last provided inside a for loop?", "gold_files": ["runtime.py"], "gold_symbols": ["LoopContext"]}

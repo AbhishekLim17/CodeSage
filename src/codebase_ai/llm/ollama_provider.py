@@ -5,6 +5,9 @@ Two Ollama behaviours shape this adapter:
 * Its default context window is far smaller than a retrieved prompt, and it truncates silently. ``num_ctx`` is always
   set, and ``context_window`` tells the answerer how much prompt it may build.
 * Local models are run with a low temperature unless the caller asks otherwise, which suits grounded code answers.
+* Even at temperature 0, a request answered straight after another can come out differently from the same request
+  sent to a freshly loaded model (research/DETERMINISM_CHECK.md). ``keep_alive=0`` unloads the model after every
+  request, so each answer starts fresh and repeats exactly; the study's runs use it.
 """
 
 from __future__ import annotations
@@ -66,8 +69,10 @@ class OllamaProvider:
         num_ctx: int = 16_384,
         timeout: float = 120.0,
         client: Any = None,
+        keep_alive: float | str | None = None,
     ):
         self.model = model
+        self.keep_alive = keep_alive  # None: Ollama's default (5 minutes); 0: unload after every request
         self._host = host
         # Ollama on another machine is still "off machine": the prompt, with the retrieved code, crosses the network.
         self.sends_code_off_machine = not is_local_host(host)
@@ -107,7 +112,10 @@ class OllamaProvider:
         finish: FinishReason = "other"
         usage: Usage | None = None
         try:
-            for chunk in client.chat(model=self.model, messages=chat_messages, stream=True, options=options):
+            chunks = client.chat(
+                model=self.model, messages=chat_messages, stream=True, options=options, keep_alive=self.keep_alive
+            )
+            for chunk in chunks:
                 text = _field(_field(chunk, "message"), "content", "")
                 if text:
                     yield TextDelta(text)

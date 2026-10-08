@@ -13,7 +13,12 @@ from codebase_ai.rag.answerer import (
     context_budget_for,
     create_answerer,
 )
-from codebase_ai.rag.prompts import NO_CONTEXT_ANSWER, REFUSAL_ANSWER, SYSTEM_PROMPT
+from codebase_ai.rag.prompts import (
+    CITATION_REMINDER,
+    NO_CONTEXT_ANSWER,
+    REFUSAL_ANSWER,
+    SYSTEM_PROMPT,
+)
 from codebase_ai.retrieval.query import CONDENSE_SYSTEM, Turn
 from codebase_ai.retrieval.retriever import Retriever
 from helpers import ScriptedProvider
@@ -96,7 +101,7 @@ class TestStreaming:
         (call,) = provider.calls
         assert call["system"] == SYSTEM_PROMPT
         assert "<sources>" in call["prompt"] and "[1] web/cart.js:" in call["prompt"]
-        assert call["prompt"].endswith(f"Question: {QUESTION}")
+        assert call["prompt"].endswith(f"Question: {QUESTION}\n\n{CITATION_REMINDER}")
         assert len(call["messages"]) == 1 and call["messages"][0].role == "user"
 
     def test_generation_settings_are_passed_through(self, built, fake_embedder):
@@ -137,10 +142,10 @@ class TestFinishedAnswer:
         assert not answer.grounded
         assert any("cites no retrieved code" in w for w in answer.warnings)
 
-    def test_citations_to_missing_sources_are_removed_and_warned_about(self, built, fake_embedder):
+    def test_citations_to_missing_sources_are_marked_and_warned_about(self, built, fake_embedder):
         answer = answerer_for(built, fake_embedder, ScriptedProvider("It sums [1] and taxes [99].")).ask(QUESTION)
         assert answer.raw_text == "It sums [1] and taxes [99]."
-        assert answer.text == "It sums [1] and taxes."
+        assert answer.text == "It sums [1] and taxes [?]."
         assert answer.citations.invalid == (99,)
         assert any("[99]" in w and "do not exist" in w for w in answer.warnings)
 
@@ -290,7 +295,7 @@ class TestFollowUps:
         answer = answerer_for(built, fake_embedder, provider).ask("and the tax?", self.HISTORY)
         condense_call, answer_call = provider.calls
         assert condense_call["system"] == CONDENSE_SYSTEM
-        assert answer_call["prompt"].endswith("Question: How is tax applied when computing the shopping cart total?")
+        assert answer_call["prompt"].endswith(f"Question: How is tax applied when computing the shopping cart total?\n\n{CITATION_REMINDER}")
         assert answer.question == "and the tax?"
         assert answer.searched_for == "How is tax applied when computing the shopping cart total?"
         assert answer.retrieval.query == answer.searched_for

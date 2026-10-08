@@ -36,6 +36,16 @@ MODEL_PREFIXES: dict[str, tuple[str, str]] = {
 }
 
 
+def quiet_model_loading() -> None:
+    """Turn off the model-loading progress bars, which would land in the middle of CLI output and the UI's log."""
+    try:
+        from transformers.utils import logging as transformers_logging
+
+        transformers_logging.disable_progress_bar()  # also turns off huggingface_hub's download bars
+    except (ImportError, AttributeError):  # a transformers without this switch only stays chatty
+        pass
+
+
 class LocalEmbedder:
     """Runs a sentence-transformers model on this machine; nothing leaves the computer."""
 
@@ -51,6 +61,7 @@ class LocalEmbedder:
             try:
                 from sentence_transformers import SentenceTransformer
 
+                quiet_model_loading()
                 # trust_remote_code stays False: never execute code shipped with a downloaded model.
                 self._model = SentenceTransformer(self.model_name, trust_remote_code=False)
             except Exception as exc:

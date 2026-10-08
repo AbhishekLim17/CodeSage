@@ -12,6 +12,10 @@ A question file is JSONL, one object per line::
 coverage*, the share of those directories that the context shows (code from inside them, or a line in the repository
 map).
 
+A question of type ``unanswerable`` (plausible, but the repository does not answer it) has an empty ``gold_files``
+list; every other type needs at least one gold file. Retrieval evaluation leaves unanswerable questions out, since
+there is nothing to find, and says how many it left out.
+
 *Strict* metrics count only ``gold_files``. *Lenient* metrics also accept ``acceptable_files``, so an overview
 document that legitimately answers the question is not scored as a miss. Both are always reported.
 """
@@ -31,6 +35,8 @@ from codebase_ai.retrieval.overview import OverviewRetriever
 from codebase_ai.retrieval.repo_map import map_lists_directory
 from codebase_ai.retrieval.retriever import Retriever, Source
 
+UNANSWERABLE = "unanswerable"
+
 
 @dataclass(frozen=True)
 class EvalQuestion:
@@ -41,6 +47,11 @@ class EvalQuestion:
     acceptable_files: tuple[str, ...] = ()
     gold_symbols: tuple[str, ...] = ()
     gold_dirs: tuple[str, ...] = ()
+    key_facts: tuple[str, ...] = ()  # statements a correct answer must contain; shown to human graders
+
+    @property
+    def answerable(self) -> bool:
+        return self.type != UNANSWERABLE
 
     @property
     def lenient_files(self) -> frozenset[str]:
@@ -60,13 +71,19 @@ def load_questions(path: str | Path) -> list[EvalQuestion]:
             raise ValueError(f"{path}:{number}: not valid JSON ({exc.msg})") from exc
         if not isinstance(raw, dict):
             raise ValueError(f"{path}:{number}: expected a JSON object")  # noqa: TRY004 - bad file content, not a type bug
-        for key in ("id", "question", "gold_files"):
+        for key in ("id", "question"):
             if not raw.get(key):
                 raise ValueError(f"{path}:{number}: missing or empty '{key}'")
+        if raw.get("type") == UNANSWERABLE:
+            if raw.get("gold_files"):
+                raise ValueError(f"{path}:{number}: an unanswerable question has no gold files; leave 'gold_files' empty")
+            raw.setdefault("gold_files", [])
+        elif not raw.get("gold_files"):
+            raise ValueError(f"{path}:{number}: missing or empty 'gold_files' (only an unanswerable question has none)")
         if raw["id"] in seen:
             raise ValueError(f"{path}:{number}: duplicate id '{raw['id']}'")
         seen.add(raw["id"])
-        for key in ("gold_files", "acceptable_files", "gold_symbols", "gold_dirs"):
+        for key in ("gold_files", "acceptable_files", "gold_symbols", "gold_dirs", "key_facts"):
             value = raw.get(key, [])
             if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
                 raise ValueError(f"{path}:{number}: '{key}' must be a list of non-empty strings")
@@ -79,6 +96,7 @@ def load_questions(path: str | Path) -> list[EvalQuestion]:
                 acceptable_files=tuple(raw.get("acceptable_files", [])),
                 gold_symbols=tuple(raw.get("gold_symbols", [])),
                 gold_dirs=tuple(raw.get("gold_dirs", [])),
+                key_facts=tuple(raw.get("key_facts", [])),
             )
         )
     if not questions:
@@ -157,6 +175,7 @@ class QuestionResult:
 class EvalReport:
     name: str
     results: list[QuestionResult] = field(default_factory=list)
+    unanswerable: int = 0  # questions left out: the repository does not answer them, so there is nothing to find
 
     def _summary_for(self, results: Sequence[QuestionResult]) -> dict[str, float]:
         if not results:
@@ -193,9 +212,15 @@ class EvalReport:
 
 
 def evaluate(retriever: Retriever | OverviewRetriever, questions: Sequence[EvalQuestion], name: str | None = None) -> EvalReport:
-    """Run every question through ``retriever`` and score the ranking and the context it would hand to an LLM."""
+    """Run every question through ``retriever`` and score the ranking and the context it would hand to an LLM.
+
+    Unanswerable questions are counted in ``report.unanswerable`` and not scored: no file can be the right one.
+    """
     report = EvalReport(name=name or retriever.mode)
     for q in questions:
+        if not q.answerable:
+            report.unanswerable += 1
+            continue
         started = time.perf_counter()
         result = retriever.retrieve(q.question)
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -243,4 +268,7 @@ def to_markdown(reports: Sequence[EvalReport], *, title: str | None = None) -> s
             f"{s['lenient_mrr']:.3f} | {_pct(s['context_recall'])} | {symbols} | {s['avg_tokens']:.0f} | "
             f"{s['avg_ms']:.0f} |"
         )
+    left_out = max((r.unanswerable for r in reports), default=0)
+    if left_out:
+        lines += ["", f"{left_out} unanswerable question(s) left out: the repository does not answer them."]
     return "\n".join(lines)

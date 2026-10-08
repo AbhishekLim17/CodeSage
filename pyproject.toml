@@ -30,8 +30,9 @@ dependencies = [
 anthropic = ["anthropic"]
 openai = ["openai"]
 ollama = ["ollama"]
+figures = ["matplotlib>=3.9"]  # eval/figures.py, the study's figures
 # The provider tests drive the real vendor SDKs over mocked HTTP, so development needs all three.
-dev = ["pytest>=8", "ruff>=0.16,<0.17", "anthropic", "openai", "ollama"]  # ruff is pinned so CI lints what you lint
+dev = ["pytest>=8", "ruff>=0.16,<0.17", "anthropic", "openai", "ollama", "matplotlib>=3.9"]  # ruff is pinned so CI lints what you lint
 
 [project.scripts]
 codebase-ai = "codebase_ai.cli:app"

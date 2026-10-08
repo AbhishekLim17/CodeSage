@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 import pathspec
 
-from codebase_ai.ingest.languages import KIND_CONFIG, classify
+from codebase_ai.ingest.languages import KIND_CONFIG, KIND_DOC, classify
 from codebase_ai.ingest.secrets import find_secret, is_secret_filename
 
 # Directories that never contain first-party source worth indexing.
@@ -114,7 +114,8 @@ def load_source_file(
     text = data.decode("utf-8-sig", errors="replace").replace("\r\n", "\n")
     if not text.strip():
         return None, "empty"
-    if max(len(line) for line in text.split("\n")) > limits.max_line_chars:
+    # Prose is often written one paragraph per line, so a long line only means "minified" in code and config.
+    if kind != KIND_DOC and max(len(line) for line in text.split("\n")) > limits.max_line_chars:
         return None, "minified_or_generated"
     if find_secret(text) is not None:
         return None, "secret_pattern"

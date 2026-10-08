@@ -11,7 +11,7 @@ from streamlit.testing.v1 import AppTest
 from codebase_ai.config import Settings
 from codebase_ai.index.indexer import Indexer, RepoIndex
 from codebase_ai.llm.base import ProviderError
-from codebase_ai.rag.prompts import NO_CONTEXT_ANSWER
+from codebase_ai.rag.prompts import CITATION_REMINDER, NO_CONTEXT_ANSWER
 from codebase_ai.ui.streamlit_app import REPO_ENV, escape_math
 from helpers import FakeEmbedder, ScriptedProvider
 
@@ -128,6 +128,15 @@ class TestIndexing:
         assert at.sidebar.button(key="index_button").label == "Update index"
         assert not chat_disabled(at)
 
+    def test_a_folder_with_nothing_to_search_is_reported_not_celebrated(self, monkeypatch, llm, tmp_path):
+        (tmp_path / "pictures").mkdir()
+        (tmp_path / "pictures" / "cat.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+        monkeypatch.setenv(REPO_ENV, str(tmp_path / "pictures"))
+        at = start()
+        at.sidebar.button(key="index_button").click().run()
+        assert any("Nothing to search" in e.value for e in at.sidebar.error)
+        assert not at.sidebar.success
+
     def test_updating_an_unchanged_repo_says_nothing_was_new(self, indexed):
         at = start()
         at.sidebar.button(key="index_button").click().run()
@@ -184,9 +193,9 @@ class TestAsking:
         llm.provider = ScriptedProvider(reply)
         ask(ask(start(), "cart total"), "and the server?")
         first, rewrite, second = llm.provider.calls
-        assert first["prompt"].endswith("Question: cart total")
+        assert first["prompt"].endswith(f"Question: cart total\n\n{CITATION_REMINDER}")
         assert "<conversation>" in rewrite["prompt"] and "cart total" in rewrite["prompt"]
-        assert second["prompt"].endswith("Question: How is the shopping cart total computed on the server?")
+        assert second["prompt"].endswith(f"Question: How is the shopping cart total computed on the server?\n\n{CITATION_REMINDER}")
         assert "<conversation>" not in second["prompt"] and "Done [1]." not in second["prompt"]
         assert len(second["messages"]) == 1
 
@@ -231,11 +240,11 @@ class TestWarningsAndFailures:
         at = ask(start())
         assert any("cites no retrieved code" in w.value for w in at.warning)
 
-    def test_a_citation_to_a_missing_source_is_removed_and_flagged(self, indexed, llm):
+    def test_a_citation_to_a_missing_source_is_marked_and_flagged(self, indexed, llm):
         llm.provider = ScriptedProvider("Adds [1] and taxes [99].")
         at = ask(start())
         shown = at.chat_message[1].markdown[0].value
-        assert "[99]" not in shown and "[1]" in shown
+        assert "[99]" not in shown and "[1]" in shown and "taxes [?]" in shown
         assert any("[99]" in w.value and "do not exist" in w.value for w in at.warning)
 
     def test_a_truncated_answer_is_flagged(self, indexed, llm):
@@ -259,10 +268,14 @@ class TestWarningsAndFailures:
         llm.provider = ScriptedProvider(error=ProviderError("The API key was rejected.", "auth", provider="scripted"))
         at = ask(start())
         assert [e.value for e in at.chat_message[1].error] == ["The API key was rejected."]
+        # The search worked, so the code that answers the question is still offered (and survives reruns).
+        found = [e for e in at.chat_message[1].expander if e.label.startswith("No answer, but this is the code")]
+        assert len(found) == 1 and any("web/cart.js" in m.value for m in found[0].markdown)
         assert not chat_disabled(at)
         llm.provider = ScriptedProvider("Fine now [1].")
         ask(at)
         assert "Fine now [1]." in at.chat_message[3].markdown[0].value
+        assert [e for e in at.chat_message[1].expander if e.label.startswith("No answer, but")]
 
     def test_an_error_mid_answer_keeps_what_arrived(self, indexed, llm):
         error = ProviderError("The connection dropped.", "connection", provider="scripted", retryable=True)

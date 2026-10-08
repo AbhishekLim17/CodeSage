@@ -52,6 +52,12 @@ def test_a_branch_is_passed_on(git):
     assert git.calls[0]["branch"] == "release/2"
 
 
+def test_a_bad_branch_is_refused_before_anything_is_fetched(git):
+    result = runner.invoke(app, ["index", URL, "--branch", "x;rm"])
+    assert result.exit_code == 2 and "not a valid branch name" in result.output
+    assert "Fetching" not in result.output and git.calls == []  # it must not even look like a download started
+
+
 def test_a_branch_makes_no_sense_for_a_local_folder(git, sample_repo):
     result = runner.invoke(app, ["index", str(sample_repo), "--branch", "dev"])
     assert result.exit_code == 2 and "--branch only applies to a git URL" in result.output

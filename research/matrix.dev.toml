@@ -1,0 +1,50 @@
+# Experiment matrix on the DEVELOPMENT set (research plan, step 3.3): for smoke runs and the pilot only.
+# The real study gets its own config after the test repositories are drawn and the test set is frozen (steps 5 and 6).
+# Paths are relative to this file. Run: python eval/run_matrix.py research/matrix.dev.toml --dry-run
+
+results_dir = "../eval/results/matrix-dev"
+# index_root = "path/to/indexes"   # default: the INDEX_DIR setting (~/.codebase_ai)
+
+# The four answering models of the protocol, smallest first.
+models = ["qwen2.5-coder:3b", "gemma3:4b", "qwen2.5-coder:7b", "llama3.1:8b"]
+
+[[repos]]
+name = "httpx"
+path = "../.venv/Lib/site-packages/httpx"
+questions = "../eval/questions/httpx.jsonl"
+
+[[repos]]
+name = "jinja2"
+path = "../.venv/Lib/site-packages/jinja2"
+questions = "../eval/questions/jinja2.jsonl"
+
+# One entry per condition (protocol section 4). `models` limits it to some models (default: all of them).
+# Contexts: "frozen" (the retrieved code) and "oracle" (the same retrieval limited to the question's gold files).
+# The 12 conditions: four models x {P0, P1}, plus P2, P3, P4 and the oracle on the 7B model.
+[[conditions]]
+prompt = "P0"
+context = "frozen"
+
+[[conditions]]
+prompt = "P1"
+context = "frozen"
+
+[[conditions]]
+prompt = "P2"
+context = "frozen"
+models = ["qwen2.5-coder:7b"]
+
+[[conditions]]
+prompt = "P3"
+context = "frozen"
+models = ["qwen2.5-coder:7b"]
+
+[[conditions]]
+prompt = "P4"
+context = "frozen"
+models = ["qwen2.5-coder:7b"]
+
+[[conditions]]
+prompt = "P1"
+context = "oracle"
+models = ["qwen2.5-coder:7b"]

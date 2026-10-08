@@ -29,6 +29,14 @@ def test_query_returns_nearest_first_with_cosine_scores(store):
     assert hits[2].score == pytest.approx(0.0, abs=1e-4)
 
 
+def test_paths_limit_the_search_to_those_files(store):
+    a, b, c = chunks_named("alpha", "beta", "gamma")
+    store.upsert([a, b, c], [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.7, 0.7, 0.0]])
+    # The best match overall (alpha) is not in the files searched, so it is not returned.
+    assert [h.chunk_id for h in store.query([1.0, 0.0, 0.0], 3, paths=["beta.py", "gamma.py"])] == [c.id, b.id]
+    assert store.query([1.0, 0.0, 0.0], 3, paths=[]) == []
+
+
 def test_k_larger_than_collection_and_empty_collection(store):
     assert store.query([1.0, 0.0], 5) == []
     (a,) = chunks_named("alpha")

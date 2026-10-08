@@ -181,6 +181,20 @@ def test_an_empty_report_has_an_empty_summary():
     assert evaluate(StubRetriever({}), []).summary == {}
 
 
+def test_an_unanswerable_question_has_no_gold_files_and_is_left_out_of_retrieval_scores(tmp_path):
+    unanswerable = {"id": "u1", "type": "unanswerable", "question": "How are failed payments retried?", "gold_files": []}
+    loaded = load_questions(write_questions(tmp_path, GOOD, unanswerable, {"id": "u2", "type": "unanswerable", "question": "Refunds?"}))
+    assert [q.answerable for q in loaded] == [True, False, False] and loaded[2].gold_files == ()
+    with pytest.raises(ValueError, match="an unanswerable question has no gold files"):
+        load_questions(write_questions(tmp_path, {**unanswerable, "gold_files": ["a.py"]}))
+    # Nothing can be found for it, so it is not scored as a miss; the report says it was left out.
+    retriever = StubRetriever({"one": (["a.py"], [make_source("a.py")])})
+    report = evaluate(retriever, [QUESTIONS[0], EvalQuestion("u1", "never asked", "unanswerable", ())])
+    assert [r.id for r in report.results] == ["q1"] and report.unanswerable == 1
+    assert report.summary["strict_hit@1"] == 1.0
+    assert "1 unanswerable question(s) left out" in to_markdown([report])
+
+
 def test_markdown_table_has_one_row_per_report():
     text = to_markdown([stub_report(), stub_report()], title="Suite")
     assert text.startswith("### Suite")

@@ -21,7 +21,8 @@ def test_the_expected_question_sets_exist():
 @pytest.mark.parametrize("path", QUESTION_FILES, ids=lambda p: p.stem)
 def test_question_files_load_and_are_well_formed(path):
     questions = load_questions(path)
-    assert len(questions) >= 20
+    # The blind sets (httpx, jinja2) have 18: questions added after seeing results would no longer be blind.
+    assert len(questions) >= 18
     assert {q.type for q in questions} <= KNOWN_TYPES
     for q in questions:
         for label in (*q.gold_files, *q.acceptable_files):
@@ -69,10 +70,9 @@ def test_self_evaluation_questions_point_at_real_files_in_this_repo():
             assert symbol in sources, f"{q.id}: symbol {symbol} not found in {q.gold_files}"
 
 
-def test_installed_rich_still_has_the_labelled_files():
-    import rich
-
-    package = Path(rich.__file__).parent
-    for q in load_questions(PROJECT / "eval" / "questions" / "rich.jsonl"):
+@pytest.mark.parametrize("name", ["rich", "httpx", "jinja2"])
+def test_installed_libraries_still_have_the_labelled_files(name):
+    package = Path(pytest.importorskip(name).__file__).parent
+    for q in load_questions(PROJECT / "eval" / "questions" / f"{name}.jsonl"):
         for label in q.gold_files:
-            assert (package / label).is_file(), f"{q.id}: rich/{label} not found (rich version changed?)"
+            assert (package / label).is_file(), f"{q.id}: {name}/{label} not found ({name} version changed?)"
