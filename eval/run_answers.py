@@ -118,7 +118,7 @@ def render(report: AnswerReport, env: dict) -> str:
         verdict = r.judgement.verdict or ("error" if r.error else "-")
         lines.append(
             f"| {r.id}: {r.question} | {'yes' if r.grounded else 'no'} | {pct(r.precision)} | "
-            f"{'yes' if r.gold_cited else 'no'} | {verdict} |"
+            f"{'n/a' if r.gold_cited is None else 'yes' if r.gold_cited else 'no'} | {verdict} |"
         )
     return "\n".join(lines) + "\n"
 

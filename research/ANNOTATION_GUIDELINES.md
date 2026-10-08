@@ -50,8 +50,9 @@ documentation, and that you can check against the repository.
    documentation page that answers it. Paths relative to the repository root, forward slashes.
 3. **Key facts**: 1 to 4 short statements that a correct answer must contain, each with the file that shows it. Write
    facts that can be checked, not vague ones. *Good:* "The retry limit defaults to 3 (`session.py`)." *Bad:* "It retries."
-4. **For an unanswerable question:** how you verified absence (the searches you ran, for example three keywords across
-   the repository and its docs). If something close exists, add a note saying what.
+4. **For an unanswerable question:** no gold files and no key facts (type `unanswerable`, `gold_files` left empty), and
+   how you verified absence (the searches you ran, for example three keywords across the repository and its docs). If
+   something close exists, add a note saying what.
 5. How long it took.
 
 ### A4. Checking someone else's question

@@ -159,6 +159,13 @@ class TestScoring:
         result = score_answer(QUESTION, answerer(built, fake_embedder, "Trust me.").ask(QUESTION.question))
         assert not result.grounded and result.precision is None and result.validity is None and not result.gold_cited
 
+    def test_an_unanswerable_question_has_no_precision_and_no_gold_file_to_cite(self, built, fake_embedder):
+        unanswerable = EvalQuestion("u1", "How are failed payments retried?", "unanswerable", ())
+        result = score_answer(unanswerable, answerer(built, fake_embedder).ask(unanswerable.question))
+        assert result.grounded and result.precision is None and result.gold_cited is None  # undefined, not 0
+        cart = score_answer(QUESTION, answerer(built, fake_embedder).ask(QUESTION.question))
+        assert AnswerReport("r", [result, cart]).summary["gold_cited_rate"] == 1.0  # the unanswerable one is left out
+
     def test_a_location_the_model_never_saw_is_counted(self, built, fake_embedder):
         answer = answerer(built, fake_embedder, "See web/checkout.js:1-9 [1].").ask(QUESTION.question)
         assert score_answer(QUESTION, answer).unverified_locations == 1
@@ -338,6 +345,11 @@ class TestOracle:
         stored = payload["questions"][self.SERVER.question]["sources"]
         assert stored and {s["path"] for s in stored} == {"go/server.go"}
         assert payload["meta"]["oracle"] is True
+
+    def test_an_unanswerable_question_has_no_oracle(self, built, fake_embedder):
+        unanswerable = EvalQuestion("u1", "How are failed payments retried?", "unanswerable", ())
+        payload = freeze_retrieval(Retriever(built, fake_embedder), [self.SERVER, unanswerable], {}, oracle=True)
+        assert list(payload["questions"]) == [self.SERVER.question]
 
     def test_gold_files_missing_from_the_index_are_an_error_not_an_empty_context(self, built, fake_embedder):
         typo = EvalQuestion(id="q3", question="anything", type="explain", gold_files=("go/no_such_file.go",))

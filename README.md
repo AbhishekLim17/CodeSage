@@ -121,7 +121,7 @@ ollama qwen2.5-coder:7b, 3947 tokens in / 198 out; retrieval 9.9s, answer 98.1s
 
 The design is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The evidence behind every default, what worked, what did not and what was never measured, is in [`docs/FINAL_REPORT.md`](docs/FINAL_REPORT.md).
 
-**What was and was not tested.** About 980 automated tests pass, on Ubuntu (Python 3.11 and 3.13) and Windows (3.13) in CI, offline and without an API key. Retrieval, indexing, the repository map and git cloning have been run for real, and so has answering: **30 questions were answered fully offline by `qwen2.5-coder:7b` through Ollama** (results in [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) section 3). **Claude and OpenAI have not been run live**: their adapters are tested against the real vendor SDKs over mocked HTTP only, and follow-up rewriting has only been tested with scripted models. If a provider misbehaves, the error says which one and what kind of failure it was.
+**What was and was not tested.** About 1,030 automated tests pass, offline and without an API key; CI runs them on Ubuntu (Python 3.11 and 3.13) and Windows (3.13). Retrieval, indexing, the repository map and git cloning have been run for real, and so has answering: **30 questions were answered fully offline by `qwen2.5-coder:7b` through Ollama** (results in [`docs/QUALITY_EVAL.md`](docs/QUALITY_EVAL.md) section 3). **Claude and OpenAI have not been run live**: their adapters are tested against the real vendor SDKs over mocked HTTP only, and follow-up rewriting has only been tested with scripted models. If a provider misbehaves, the error says which one and what kind of failure it was.
 
 ## Install
 
@@ -209,7 +209,7 @@ With a cloud LLM or cloud embeddings, retrieved code snippets are sent to that p
 
 ```bash
 pip install -e ".[dev]"
-pytest                               # about 960 tests; needs no network and no API key
+pytest                               # about 1,030 tests; needs no network and no API key
 ruff check src tests eval
 ```
 

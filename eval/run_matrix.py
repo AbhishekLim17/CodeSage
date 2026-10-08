@@ -90,23 +90,45 @@ def jobs_of(config: dict) -> list[dict]:
     ]
 
 
+def model_info(entries: list[dict], shown: dict | None = None) -> dict:
+    """What the record says about one model: the digest that actually runs, its size and quantisation.
+
+    Ollama 0.40 keeps some models as several variants under one name (gemma3:4b became the original file plus a copy
+    repacked for its llama.cpp runner), and lists the name once per variant. Then ``shown`` (``/api/show``) says which
+    variant is selected; every variant is recorded, and ``digest`` is the selected one (None if Ollama does not say).
+    """
+    details = entries[0]["details"]
+    info = {"digest": entries[0]["digest"], "parameter_size": details.get("parameter_size"),
+            "quantization_level": details.get("quantization_level")}
+    variants = (shown or {}).get("manifests") or []
+    if len(entries) > 1 or len(variants) > 1:
+        info["variants"] = [{"digest": v["digest"].removeprefix("sha256:"), "runner": v.get("runner"),
+                             "selected": bool(v.get("selected"))} for v in variants]
+        selected = [v["digest"] for v in info["variants"] if v["selected"]]
+        info["digest"] = selected[0] if len(selected) == 1 else None
+    return info
+
+
+def _get(host: str, path: str, body: dict | None = None) -> dict:
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(f"{host}{path}", data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+
 def ollama_state(host: str) -> tuple[str | None, dict[str, dict]]:
-    """Ollama's version and the pulled models with their digest, size and quantisation; (None, {}) if unreachable."""
+    """Ollama's version and, per pulled model, ``model_info``; (None, {}) if Ollama is unreachable."""
     try:
-        with urllib.request.urlopen(f"{host}/api/version", timeout=10) as response:
-            version = json.load(response)["version"]
-        with urllib.request.urlopen(f"{host}/api/tags", timeout=10) as response:
-            pulled = json.load(response)["models"]
+        version = _get(host, "/api/version")["version"]
+        grouped: dict[str, list[dict]] = {}
+        for entry in _get(host, "/api/tags")["models"]:
+            grouped.setdefault(entry["name"], []).append(entry)
+        return version, {
+            name: model_info(entries, _get(host, "/api/show", {"model": name}) if len(entries) > 1 else None)
+            for name, entries in grouped.items()
+        }
     except (urllib.error.URLError, OSError, KeyError, ValueError):
         return None, {}
-    return version, {
-        m["name"]: {
-            "digest": m["digest"],
-            "parameter_size": m["details"].get("parameter_size"),
-            "quantization_level": m["details"].get("quantization_level"),
-        }
-        for m in pulled
-    }
 
 
 def code_version() -> dict:
@@ -151,6 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print("error: these models are not pulled:" + "".join(f"\n  ollama pull {m}" for m in missing), file=sys.stderr)
         return 2
+    for model in config["models"]:
+        variants = pulled[model].get("variants")
+        if variants:
+            chosen = pulled[model]["digest"] or "not stated by Ollama"
+            print(f"Note: Ollama keeps {model} as {len(variants)} variants under one name; each job records all of them "
+                  f"and the one it runs ({chosen}).")
     if code["uncommitted_changes"]:
         print("Warning: the code has uncommitted changes, so these results are not tied to a commit. Commit and tag the "
               "code before the real test runs.")

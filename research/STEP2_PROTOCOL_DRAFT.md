@@ -108,6 +108,15 @@ whether the app's settings let you turn the update check off (not verified), and
 3.9) on the version you keep. The matrix runner already writes the version into `runs.jsonl` for every job, so a
 mid-study update would show up there. Since 2026-10-07 the models live in `A:\Ollama\models` (user environment variable
 `OLLAMA_MODELS`) and the program in `A:\Ollama\app`; a link at the old `C:` path keeps the installed app working.
+**An update can also change a model.** The first time 0.40.0 loaded `gemma3:4b` (2026-10-07), it turned it into two
+variants under one name: the original file (runner `ggml`) and a copy it repacked for its llama.cpp runner (the same
+weights split into a text model and an image part), and it now runs the second. The model's listed digest therefore
+changed (`a2af6cc3eb7f` on 2026-10-06; `c30276f7dffe` now), although the weights file is the one downloaded. The matrix
+runner records, for such a model, every variant and the one Ollama says it runs (2026-10-08); development runs of
+gemma before that date used the original variant. On 2026-10-08 automatic updates were turned off in the Ollama app
+(its settings record `auto_update_enabled = 0`), so the study stays on 0.40.0 unless updated on purpose; a 0.40.1
+update was on offer and was not installed. Any later update means re-running the determinism check before results
+from both versions are pooled.
 
 ---
 

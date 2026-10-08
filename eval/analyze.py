@@ -140,18 +140,19 @@ def load_answers(results_dir: Path) -> pd.DataFrame:
             question = questions[row["id"]]
             supplied = [s["path"] for s in frozen.get(row["question"], {}).get("sources", [])]
             supplied = supplied[:3] if prompt == "P3" else supplied  # what P3 actually showed
-            knowable = bool(frozen) and question.type != "unanswerable"
+            knowable = bool(frozen) and question.answerable
             rows.append({
                 "results_file": str(path.resolve()), "repo": path.parent.parent.name, "model": env["model"],
                 "prompt": prompt, "context": context, "question_id": row["id"], "type": question.type,
                 "failed": row.get("error") is not None, "grounded": bool(row.get("grounded")),
-                "precision": row.get("precision"), "gold_cited": bool(row.get("gold_cited")),
+                "precision": row.get("precision"), "gold_cited": row.get("gold_cited"),  # None: unanswerable
                 "unverified_location": bool(row.get("unverified_locations")),
                 "gold_in_context": any(p in question.gold_files for p in supplied) if knowable else None,
             })
     table = pd.DataFrame(rows)
     if not table.empty:
         table["precision"] = pd.to_numeric(table["precision"])  # None (nothing cited) becomes NaN
+        table["gold_cited"] = table["gold_cited"].astype(float)  # None (unanswerable) becomes NaN, left out of means
     return table
 
 

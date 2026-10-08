@@ -97,7 +97,7 @@ def collect(result_files: list[Path]) -> list[dict]:
             items.append({
                 "question_id": row["id"],
                 "question": row["question"],
-                "answerable": question.type != "unanswerable",
+                "answerable": question.answerable,
                 "key_facts": list(question.key_facts),
                 "answer": row["answer"],
                 "cited_code": [list(c) for c in row.get("cited_code", [])],

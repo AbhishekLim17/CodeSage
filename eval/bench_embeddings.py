@@ -36,7 +36,9 @@ DEFAULT_MODELS = (
 
 
 def load_questions(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    """The questions with a file to find; unanswerable ones are left out (there is nothing to retrieve)."""
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [q for q in rows if q.get("type") != "unanswerable"]
 
 
 def by_type(questions: list[dict], ranks: list[int | None]) -> dict[str, dict[str, float]]:

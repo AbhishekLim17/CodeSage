@@ -131,7 +131,7 @@ class AnswerResult:
     grounded: bool = False
     validity: float | None = None
     precision: float | None = None
-    gold_cited: bool = False
+    gold_cited: bool | None = False  # None for an unanswerable question: there is no gold file to cite
     uncited_share: float | None = None
     unverified_locations: int = 0
     finish: str = ""
@@ -150,7 +150,8 @@ class AnswerResult:
 def score_answer(question: EvalQuestion, answer: Answer, judgement: Judgement | None = None) -> AnswerResult:
     """Deterministic scores for one answer (plus its judgement, if one was made)."""
     cited = answer.cited_sources
-    relevant = [_is_relevant(source, question) for _, source in cited]
+    # No source can be relevant to a question the repository does not answer, so precision is undefined there.
+    relevant = [_is_relevant(source, question) for _, source in cited] if question.answerable else []
     supplied = len(answer.sources)
     usage = answer.usage
     return AnswerResult(
@@ -161,7 +162,7 @@ def score_answer(question: EvalQuestion, answer: Answer, judgement: Judgement | 
         grounded=answer.grounded,
         validity=answer.citations.validity,
         precision=fmean(1.0 if r else 0.0 for r in relevant) if relevant else None,
-        gold_cited=any(source.path in question.lenient_files for _, source in cited),
+        gold_cited=any(source.path in question.lenient_files for _, source in cited) if question.answerable else None,
         uncited_share=len(answer.citations.uncited) / supplied if supplied else None,
         unverified_locations=len(answer.citations.unverified_locations),
         finish=answer.finish,
@@ -197,7 +198,7 @@ class AnswerReport:
             "grounded_rate": _mean([1.0 if r.grounded else 0.0 for r in answered]),
             "citation_validity": _mean([r.validity for r in answered]),
             "citation_precision": _mean([r.precision for r in answered]),
-            "gold_cited_rate": _mean([1.0 if r.gold_cited else 0.0 for r in answered]),
+            "gold_cited_rate": _mean([float(r.gold_cited) for r in answered if r.gold_cited is not None]),
             "uncited_share": _mean([r.uncited_share for r in answered]),
             "unverified_location_rate": _mean([1.0 if r.unverified_locations else 0.0 for r in answered]),
             "refusal_rate": _mean([1.0 if r.refused else 0.0 for r in answered]),

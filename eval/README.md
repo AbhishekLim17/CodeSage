@@ -15,7 +15,11 @@ repository, as JSONL:
   **Lenient** metrics accept gold or acceptable. Both views are always reported.
 - `gold_symbols` (optional): functions/classes whose code should be in the retrieved context.
 - `gold_dirs` (optional, overview questions): directories an answer to a whole-repository question needs; scored as *area coverage*.
+- `key_facts` (optional): short statements a correct answer must contain; shown to the human graders.
 - `type`: `locate`, `explain` or `doc`, or `overview` in the `*_overview.jsonl` files. Paths are relative to the repo root, with forward slashes.
+  Type `unanswerable` marks a question the repository does not answer: its `gold_files` is empty (every other type
+  needs at least one), retrieval evaluation leaves it out and says so, and an answer to it has no precision or
+  "gold cited" score; whether the model abstained is for the human graders.
 
 | File | Repository | Language | Questions | Labelled by |
 |---|---|---|---|---|

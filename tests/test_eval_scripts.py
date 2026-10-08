@@ -433,6 +433,19 @@ def test_the_matrix_freezes_once_runs_every_job_logs_it_and_resumes(matrix):
     assert len((matrix.results / "runs.jsonl").read_text(encoding="utf-8").splitlines()) == 4
 
 
+def test_a_model_kept_as_several_variants_records_the_one_that_runs():
+    run_matrix = load_script("run_matrix")
+    entry = {"digest": "aa11", "details": {"parameter_size": "4.3B", "quantization_level": "Q4_K_M"}}
+    assert run_matrix.model_info([entry]) == {"digest": "aa11", "parameter_size": "4.3B", "quantization_level": "Q4_K_M"}
+    # Ollama 0.40 lists gemma3:4b twice, one entry per variant; /api/show marks the variant it runs.
+    shown = {"manifests": [{"digest": "sha256:aa11", "runner": "ggml"},
+                           {"digest": "sha256:cc33", "runner": "llamacpp", "selected": True}]}
+    both = [entry, {**entry, "digest": "cc33"}]
+    info = run_matrix.model_info(both, shown)
+    assert info["digest"] == "cc33" and [(v["digest"], v["runner"]) for v in info["variants"]] == [("aa11", "ggml"), ("cc33", "llamacpp")]
+    assert run_matrix.model_info(both, {"manifests": []})["digest"] is None  # never a guess
+
+
 def test_unknown_conditions_are_refused(matrix, capsys):
     assert matrix.run.main([matrix.config('prompt = "P9"\ncontext = "live"')]) == 2
     err = capsys.readouterr().err

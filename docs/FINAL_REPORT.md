@@ -17,8 +17,8 @@ question -> [follow-up rewritten to stand alone] -> vector search, test files de
    -> Claude / OpenAI / Ollama, streaming -> every [n] checked against the sources -> answer + cited code
 ```
 
-About 6,000 lines of library code in 42 modules, 7,000 lines of tests (about 960 tests that need no network and no
-API key), and 1,100 lines of evaluation scripts, plus a Typer CLI (`index`, `stats`, `search`, `ask`, `serve`, `chunks`,
+About 6,300 lines of library code in 42 modules, 7,800 lines of tests (about 1,030 tests that need no network and no
+API key), and 3,200 lines of evaluation scripts (counted 2026-10-08, the study's test bed included), plus a Typer CLI (`index`, `stats`, `search`, `ask`, `serve`, `chunks`,
 `eval`) and a Streamlit chat.
 
 | Milestone | Delivered |
